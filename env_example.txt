@@ -1,0 +1,39 @@
+# Meal Optimization API Configuration
+# Copy this file to .env and modify as needed
+
+# API Configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+API_RELOAD=true
+
+# Database Configuration
+DATABASE_FILE=ingredients_database.json
+
+# Optimization Configuration
+OPTIMIZATION_TIMEOUT=300
+MAX_INGREDIENTS_PER_MEAL=10
+MIN_INGREDIENT_QUANTITY=10.0
+MAX_INGREDIENT_QUANTITY=500.0
+
+# Genetic Algorithm Parameters
+GA_POPULATION_SIZE=50
+GA_GENERATIONS=30
+GA_CROSSOVER_RATE=0.7
+GA_MUTATION_RATE=0.2
+
+# Differential Evolution Parameters
+DE_POPULATION_SIZE=15
+DE_MAX_ITERATIONS=100
+
+# Nutritional Constraints
+MIN_PROTEIN_RATIO=0.8
+MIN_CALORIE_RATIO=0.8
+MAX_SODIUM_PER_DAY=2300
+MIN_FIBER_PER_DAY=25
+
+# CORS Configuration
+CORS_ORIGINS=*
+
+# Logging Configuration
+LOG_LEVEL=INFO
+

@@ -1,3 +1,8 @@
+# Git
+.git
+.gitignore
+
+# Python
 __pycache__
 *.pyc
 *.pyo
@@ -18,9 +23,41 @@ coverage.xml
 .mypy_cache
 .pytest_cache
 .hypothesis
-.DS_Store
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Railway specific
+.railway/
+railway.json
+Procfile
+
+# Documentation
+*.md
+!README.md
+
+# Test files
 test_*.py
-*.test.py
+*_test.py

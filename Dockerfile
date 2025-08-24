@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+# Add build argument for cache busting
+ARG BUILD_DATE
+ARG VCS_REF
+
 WORKDIR /app
 
 # Install system dependencies
@@ -17,11 +21,8 @@ RUN pip install --no-cache-dir -r requirements-minimal.txt
 # Copy application code
 COPY . .
 
-# Make start.sh executable
-RUN chmod +x start.sh
-
 # Expose port (will be set by Railway)
 EXPOSE $PORT
 
-# Use start.sh script to handle PORT expansion
-CMD ["./start.sh"]
+# Use direct shell command for PORT expansion
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]

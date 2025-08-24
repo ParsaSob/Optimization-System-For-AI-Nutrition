@@ -3,17 +3,35 @@
 ## 🔍 **مشکل حل شده:**
 ```
 Error: Invalid value for '--port': '$PORT' is not a valid integer.
-Port mismatch between Railway PORT and Dockerfile
+PORT environment variable not expanding in Dockerfile CMD
 ```
 
-## 🛠️ **راه‌حل صحیح: Dockerfile + Railway PORT**
+## 🛠️ **راه‌حل صحیح: Shell Script + PORT Expansion**
 
 ### **کلید حل مشکل:**
-Railway خودش PORT environment variable set می‌کنه (مثل 8080). Dockerfile باید از همون استفاده کنه.
+Dockerfile نمی‌تونه $PORT رو expand کنه. Shell script این کار رو انجام می‌ده.
 
 ## 📁 **فایل‌های کلیدی:**
 
-### **1. Dockerfile (Using Railway PORT):**
+### **1. start.sh (Shell Script):**
+```bash
+#!/bin/bash
+
+# Get port from environment variable or default to 8000
+PORT=${PORT:-8000}
+
+echo "🚀 Starting Meal Optimization API on port $PORT"
+
+# Start uvicorn with the resolved port
+exec uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+**توضیح:**
+- **`PORT=${PORT:-8000}`**: Shell expansion برای PORT
+- **`exec uvicorn`**: Start uvicorn با port resolved شده
+- **Proper Expansion**: Shell script $PORT رو درست expand می‌کنه
+
+### **2. Dockerfile (Using start.sh):**
 ```dockerfile
 FROM python:3.11-slim
 
@@ -34,19 +52,22 @@ RUN pip install --no-cache-dir -r requirements-minimal.txt
 # Copy application code
 COPY . .
 
+# Make start.sh executable
+RUN chmod +x start.sh
+
 # Expose port (will be set by Railway)
 EXPOSE $PORT
 
-# Run the application using Railway's PORT
-CMD uvicorn main:app --host 0.0.0.0 --port $PORT
+# Use start.sh script to handle PORT expansion
+CMD ["./start.sh"]
 ```
 
 **توضیح:**
-- **`EXPOSE $PORT`**: Docker exposes Railway's assigned port
-- **`CMD uvicorn main:app --host 0.0.0.0 --port $PORT`**: Uses Railway's PORT environment variable
-- **Dynamic Port**: Railway خودش port رو set می‌کنه
+- **`RUN chmod +x start.sh`**: Make script executable
+- **`CMD ["./start.sh"]`**: Use shell script for PORT expansion
+- **Shell Expansion**: Shell script $PORT رو درست handle می‌کنه
 
-### **2. main.py:**
+### **3. main.py:**
 - Railway-friendly logging
 - Better error handling
 - Dynamic port approach
@@ -57,7 +78,7 @@ CMD uvicorn main:app --host 0.0.0.0 --port $PORT
 ### **1. Push تغییرات:**
 ```bash
 git add .
-git commit -m "Use Railway PORT in Dockerfile for proper deployment"
+git commit -m "Use shell script for proper PORT expansion in Dockerfile"
 git push
 ```
 
@@ -81,15 +102,14 @@ curl https://web-production-c541.up.railway.app/health
 ```
 Building Docker image...
 Installing dependencies...
+Making start.sh executable...
 Starting service...
 ```
 
 ### **Startup Logs:**
 ```
-🚀 Starting Meal Optimization API
-🌍 Environment: Railway deployment
-🔧 Railway PORT env: 8080
-Uvicorn running on http://0.0.0.0:8080
+🚀 Starting Meal Optimization API on port 8080
+INFO: Uvicorn running on http://0.0.0.0:8080
 ```
 
 ### **Root Endpoint:**
@@ -108,9 +128,9 @@ Uvicorn running on http://0.0.0.0:8080
 
 ## 🔧 **چرا این راه‌حل کار می‌کنه:**
 
-1. **Railway PORT**: Railway خودش port رو set می‌کنه (مثل 8080)
-2. **Dockerfile CMD**: از Railway PORT استفاده می‌کنه
-3. **No Port Conflicts**: Railway و Dockerfile روی همون port کار می‌کنن
+1. **Shell Script**: $PORT رو درست expand می‌کنه
+2. **Dockerfile CMD**: از shell script استفاده می‌کنه
+3. **Proper Expansion**: Shell script environment variables رو handle می‌کنه
 4. **Host Binding**: Bind به همه interfaces
 5. **Dynamic Configuration**: Railway خودش port رو handle می‌کنه
 
@@ -120,12 +140,12 @@ Uvicorn running on http://0.0.0.0:8080
 - Go to Railway dashboard
 - Click on your service
 - Check "Deployments" tab
-- Look for "Uvicorn running on" message with correct port
+- Look for "Starting Meal Optimization API on port XXXX" message
 
-### **Check 2: Dockerfile Syntax**
-- Ensure CMD is correct: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- Check for typos
-- Verify EXPOSE $PORT
+### **Check 2: Shell Script**
+- Ensure start.sh is executable: `chmod +x start.sh`
+- Check for typos in start.sh
+- Verify shell script syntax
 
 ### **Check 3: Environment Variables**
 - Check Railway dashboard for PORT environment variable
@@ -133,47 +153,45 @@ Uvicorn running on http://0.0.0.0:8080
 
 ## 📝 **Success Indicators:**
 - ✅ Docker build successful
-- ✅ No more port mismatch errors
-- ✅ Uvicorn starts on Railway's PORT
+- ✅ Shell script executes properly
+- ✅ PORT environment variable expands correctly
+- ✅ Uvicorn starts on correct port
 - ✅ Application responds to requests
 - ✅ Root endpoint returns 200
-- ✅ Health endpoint shows components ready
 
 ## 🔧 **Alternative Approaches:**
 
-### **Option 1: Use Railway PORT (current)**
+### **Option 1: Shell Script (current)**
 ```dockerfile
-EXPOSE $PORT
-CMD uvicorn main:app --host 0.0.0.0 --port $PORT
+CMD ["./start.sh"]
 ```
 
-### **Option 2: Fixed Port (if needed)**
+### **Option 2: Direct Shell Command**
 ```dockerfile
-EXPOSE 8080
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
 ```
 
 ## 🎯 **نکات مهم:**
-1. **Railway PORT**: Railway خودش port رو set می‌کنه
-2. **Dockerfile CMD**: از Railway PORT استفاده می‌کنه
-3. **No Port Conflicts**: Railway و Dockerfile sync هستن
+1. **Shell Script**: $PORT رو درست expand می‌کنه
+2. **Dockerfile CMD**: از shell script استفاده می‌کنه
+3. **Proper Expansion**: Shell script environment variables رو handle می‌کنه
 4. **Host Binding**: Bind به همه interfaces
-5. **Dynamic Configuration**: Railway خودش handle می‌کنه
+5. **Dynamic Configuration**: Railway خودش port رو handle می‌کنه
 
 ## 🔍 **مزایای این روش:**
 
-- **قابل اعتماد**: Railway و Dockerfile روی همون port کار می‌کنن
-- **No Port Conflicts**: Railway خودش port رو set می‌کنه
-- **Dynamic Port**: Railway خودش handle می‌کنه
+- **قابل اعتماد**: Shell script $PORT رو درست expand می‌کنه
+- **Proper Expansion**: Environment variables درست handle می‌شن
+- **Dynamic Port**: Railway خودش port رو handle می‌کنه
 - **Host Binding**: Bind به همه interfaces
 - **Simple**: ساده و قابل فهم
 
 ## 🚀 **مراحل بعدی:**
 
-1. **Push تغییرات** (Dockerfile + main.py)
+1. **Push تغییرات** (start.sh + Dockerfile + main.py)
 2. **Railway auto-redeploys** از Dockerfile
-3. **Check Railway Logs** برای "Uvicorn running on port 8080"
+3. **Check Railway Logs** برای "Starting Meal Optimization API on port XXXX"
 4. **Test endpoints** برای functionality
 5. **Monitor performance** برای stability
 
-**حالا تغییرات رو push کن و Railway خودش از Dockerfile استفاده می‌کنه. Railway PORT و Dockerfile sync میشن!** 🚀
+**حالا تغییرات رو push کن و Railway خودش از Dockerfile استفاده می‌کنه. Shell script $PORT رو درست expand می‌کنه!** 🚀

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Any
 from enum import Enum
 
 class MealTime(str, Enum):
@@ -101,4 +101,45 @@ class IngredientDatabase(BaseModel):
     ingredients: List[Ingredient]
     last_updated: str
     version: str = "1.0.0"
+
+class RAGIngredient(BaseModel):
+    """Ingredient from RAG response with nutritional data"""
+    name: str = Field(..., description="Ingredient name")
+    amount: float = Field(..., description="Amount in grams")
+    unit: str = Field(..., description="Unit of measurement")
+    calories: float = Field(..., description="Calories for the amount")
+    protein: float = Field(..., description="Protein in grams for the amount")
+    carbs: float = Field(..., description="Carbohydrates in grams for the amount")
+    fat: float = Field(..., description="Fat in grams for the amount")
+
+class RAGSuggestion(BaseModel):
+    """Suggestion from RAG response"""
+    ingredients: List[RAGIngredient] = Field(..., description="List of ingredients")
+
+class RAGResponse(BaseModel):
+    """RAG response containing meal suggestions"""
+    suggestions: List[RAGSuggestion] = Field(..., description="List of meal suggestions")
+
+class SingleMealRequest(BaseModel):
+    """Request for single meal optimization"""
+    rag_response: RAGResponse = Field(..., description="RAG response with ingredients")
+    target_macros: NutritionalTarget = Field(..., description="Target macros for the meal")
+    user_preferences: UserPreferences = Field(..., description="User preferences")
+    meal_type: str = Field(..., description="Type of meal (breakfast, lunch, dinner, etc.)")
+
+class SingleMealItem(BaseModel):
+    """Individual meal item with quantity and nutritional info"""
+    ingredient: str = Field(..., description="Ingredient name")
+    quantity_grams: float = Field(..., description="Quantity in grams")
+    calories: float = Field(..., description="Calculated calories")
+    protein: float = Field(..., description="Calculated protein")
+    carbs: float = Field(..., description="Calculated carbohydrates")
+    fat: float = Field(..., description="Calculated fat")
+
+class SingleMealResponse(BaseModel):
+    """Response for single meal optimization"""
+    optimization_result: Dict[str, Any] = Field(..., description="Optimization result details")
+    meal: Dict[str, Any] = Field(..., description="Optimized meal details")
+    target_achievement: Dict[str, bool] = Field(..., description="Target achievement status")
+    rag_enhancement: Dict[str, Any] = Field(..., description="RAG enhancement details")
 

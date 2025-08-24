@@ -1,1 +1,1 @@
-web: python railway-startup.py
+web: pip install -r requirements-railway.txt && uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --log-level info

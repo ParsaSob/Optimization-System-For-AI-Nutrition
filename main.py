@@ -22,8 +22,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Railway-specific configuration
+# Railway will automatically set PORT environment variable
 PORT = int(os.environ.get("PORT", 8000))
 HOST = "0.0.0.0"
+
+logger.info(f"🚀 Starting Meal Optimization API on {HOST}:{PORT}")
+logger.info(f"🌍 Environment: PORT={PORT}, HOST={HOST}")
 
 app = FastAPI(
     title="Meal Optimization API",
@@ -50,22 +54,24 @@ async def startup_event():
     global db_manager, optimization_engine
     
     try:
-        logger.info(f"Starting Meal Optimization API on {HOST}:{PORT}")
+        logger.info(f"🚀 Starting Meal Optimization API on {HOST}:{PORT}")
         
         # Initialize database
         db_manager = DatabaseManager()
         await db_manager.initialize()
-        logger.info("Database initialized successfully")
+        logger.info("✅ Database initialized successfully")
         
         # Initialize optimization engine
         optimization_engine = MealOptimizationEngine()
-        logger.info("Optimization engine ready")
+        logger.info("✅ Optimization engine ready")
+        
+        logger.info("🎉 All components initialized successfully!")
         
     except Exception as e:
-        logger.error(f"Failed to initialize components: {e}")
+        logger.error(f"❌ Failed to initialize components: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         # Don't crash the app, continue with limited functionality
-        logger.warning("Continuing with limited functionality")
+        logger.warning("⚠️ Continuing with limited functionality")
 
 @app.get("/")
 async def root():
@@ -75,7 +81,11 @@ async def root():
         "status": "healthy",
         "port": PORT,
         "host": HOST,
-        "components_ready": db_manager is not None and optimization_engine is not None
+        "components_ready": db_manager is not None and optimization_engine is not None,
+        "railway_info": {
+            "port_from_env": os.environ.get("PORT", "not_set"),
+            "python_version": os.environ.get("PYTHON_VERSION", "not_set")
+        }
     }
 
 @app.get("/health")
@@ -85,7 +95,12 @@ async def health_check():
         "status": "healthy", 
         "message": "Meal Optimization API is running",
         "database_ready": db_manager is not None,
-        "engine_ready": optimization_engine is not None
+        "engine_ready": optimization_engine is not None,
+        "railway_status": {
+            "port": PORT,
+            "host": HOST,
+            "port_env": os.environ.get("PORT", "not_set")
+        }
     }
 
 @app.post("/optimize-meal", response_model=MealResponse)

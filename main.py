@@ -25,15 +25,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Railway configuration - let Railway handle port
+# Railway configuration - get port from environment
 PORT = int(os.environ.get("PORT", 8000))
-HOST = os.environ.get("HOST", "0.0.0.0")
+HOST = "0.0.0.0"
 
 logger.info(f"🚀 Starting Meal Optimization API on {HOST}:{PORT}")
 logger.info(f"🌍 Environment: PORT={PORT}, HOST={HOST}")
 logger.info(f"🔧 Railway PORT env: {os.environ.get('PORT', 'not_set')}")
-logger.info(f"🔧 Environment HOST: {HOST}")
-logger.info(f"🔧 Environment PORT: {PORT}")
 
 app = FastAPI(
     title="Meal Optimization API",
@@ -91,7 +89,6 @@ async def root():
         "railway_info": {
             "port": PORT,
             "port_env": os.environ.get("PORT", "not_set"),
-            "host_env": HOST,
             "python_version": os.environ.get("PYTHON_VERSION", "not_set")
         }
     }
@@ -107,8 +104,7 @@ async def health_check():
         "railway_status": {
             "port": PORT,
             "host": HOST,
-            "port_env": os.environ.get("PORT", "not_set"),
-            "host_env": HOST
+            "port_env": os.environ.get("PORT", "not_set")
         }
     }
 

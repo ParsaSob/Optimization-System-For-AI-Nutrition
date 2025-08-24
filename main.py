@@ -25,9 +25,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Railway configuration - let Railway handle everything
+# Railway configuration - minimal setup
 logger.info(f"🚀 Starting Meal Optimization API")
-logger.info(f"🌍 Environment: Let Railway handle networking")
+logger.info(f"🌍 Environment: Railway deployment")
 logger.info(f"🔧 Railway PORT env: {os.environ.get('PORT', 'not_set')}")
 
 app = FastAPI(
@@ -84,7 +84,7 @@ async def root():
         "railway_info": {
             "port_env": os.environ.get("PORT", "not_set"),
             "python_version": os.environ.get("PYTHON_VERSION", "not_set"),
-            "message": "Railway handles all networking automatically"
+            "message": "Using Python startup script for Railway compatibility"
         }
     }
 
@@ -98,7 +98,7 @@ async def health_check():
         "engine_ready": optimization_engine is not None,
         "railway_status": {
             "port_env": os.environ.get("PORT", "not_set"),
-            "message": "Railway handles all networking automatically"
+            "message": "Using Python startup script for Railway compatibility"
         }
     }
 

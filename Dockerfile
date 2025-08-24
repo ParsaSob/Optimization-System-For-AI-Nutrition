@@ -17,8 +17,8 @@ RUN pip install --no-cache-dir -r requirements-minimal.txt
 # Copy application code
 COPY . .
 
-# Expose port
-EXPOSE 8000
+# Expose port 3000 (changed from 8000)
+EXPOSE 3000
 
-# Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the application on port 3000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3000"]

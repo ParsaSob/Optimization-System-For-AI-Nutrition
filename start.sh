@@ -1,10 +1,24 @@
 #!/bin/bash
 
-# Set Python version
-export PYTHON_VERSION=3.11.9
+# Railway Startup Script
+# Handles PORT environment variable and starts uvicorn properly
 
-# Install dependencies
-pip install -r requirements.txt
+echo "🚀 Starting Meal Optimization API"
+echo "🔧 Environment: PORT=$PORT"
 
-# Start the application
-uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --log-level info
+# Set default port if not provided
+if [ -z "$PORT" ]; then
+    PORT=8000
+    echo "⚠️ No PORT set, using default: $PORT"
+fi
+
+# Validate PORT is a number
+if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
+    echo "❌ Invalid PORT value: $PORT, using default 8000"
+    PORT=8000
+fi
+
+echo "🌍 Using port: $PORT"
+
+# Start uvicorn with proper port
+exec uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1

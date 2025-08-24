@@ -13,6 +13,10 @@ import logging
 import asyncio
 import os
 import traceback
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging for Railway
 logging.basicConfig(
@@ -21,12 +25,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Railway configuration - use fixed port for now
-PORT = 8000
-HOST = "0.0.0.0"
+# Railway configuration - let Railway handle port
+PORT = int(os.environ.get("PORT", 8000))
+HOST = os.environ.get("HOST", "0.0.0.0")
 
 logger.info(f"🚀 Starting Meal Optimization API on {HOST}:{PORT}")
 logger.info(f"🌍 Environment: PORT={PORT}, HOST={HOST}")
+logger.info(f"🔧 Railway PORT env: {os.environ.get('PORT', 'not_set')}")
+logger.info(f"🔧 Environment HOST: {HOST}")
+logger.info(f"🔧 Environment PORT: {PORT}")
 
 app = FastAPI(
     title="Meal Optimization API",
@@ -83,6 +90,8 @@ async def root():
         "components_ready": db_manager is not None and optimization_engine is not None,
         "railway_info": {
             "port": PORT,
+            "port_env": os.environ.get("PORT", "not_set"),
+            "host_env": HOST,
             "python_version": os.environ.get("PYTHON_VERSION", "not_set")
         }
     }
@@ -97,7 +106,9 @@ async def health_check():
         "engine_ready": optimization_engine is not None,
         "railway_status": {
             "port": PORT,
-            "host": HOST
+            "host": HOST,
+            "port_env": os.environ.get("PORT", "not_set"),
+            "host_env": HOST
         }
     }
 
@@ -287,10 +298,16 @@ async def get_meal_times():
     }
 
 if __name__ == "__main__":
+    # Get port from environment for Railway
+    port = int(os.environ.get("PORT", 8000))
+    host = "0.0.0.0"
+    
+    logger.info(f"🚀 Starting locally on {host}:{port}")
+    
     uvicorn.run(
         "main:app",
-        host=HOST,
-        port=PORT,
+        host=host,
+        port=port,
         reload=False,  # Disable reload in production
         log_level="info"
     )

@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
 """
-Startup script for Meal Optimization API
+Simple startup script for Railway deployment
 """
 
+import os
 import uvicorn
-import logging
-from config import Config
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 if __name__ == "__main__":
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, Config.LOG_LEVEL),
-        format=Config.LOG_FORMAT
-    )
+    # Get port from Railway environment or .env file
+    port = int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "0.0.0.0")
     
-    logger = logging.getLogger(__name__)
-    logger.info("Starting Meal Optimization API...")
+    print(f"🚀 Starting Meal Optimization API on {host}:{port}")
+    print(f"🔧 Railway PORT: {os.environ.get('PORT', 'not_set')}")
+    print(f"🔧 Environment HOST: {host}")
+    print(f"🔧 Environment PORT: {port}")
     
-    # Start the server
+    # Start the application
     uvicorn.run(
         "main:app",
-        host=Config.API_HOST,
-        port=Config.API_PORT,
-        reload=Config.API_RELOAD,
-        log_level=Config.LOG_LEVEL.lower()
+        host=host,
+        port=port,
+        workers=1,
+        log_level="info"
     )
 

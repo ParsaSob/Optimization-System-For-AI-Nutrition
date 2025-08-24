@@ -1,39 +1,25 @@
-# Meal Optimization API Configuration
-# Copy this file to .env and modify as needed
+# Railway Environment Variables
+# Copy this to .env file or set in Railway dashboard
+
+PORT=8000
+HOST=0.0.0.0
+PYTHON_VERSION=3.11.9
+NODE_ENV=production
 
 # API Configuration
 API_HOST=0.0.0.0
 API_PORT=8000
-API_RELOAD=true
+API_RELOAD=false
 
-# Database Configuration
-DATABASE_FILE=ingredients_database.json
+# Logging
+LOG_LEVEL=info
+LOG_FORMAT=%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
-# Optimization Configuration
-OPTIMIZATION_TIMEOUT=300
-MAX_INGREDIENTS_PER_MEAL=10
-MIN_INGREDIENT_QUANTITY=10.0
-MAX_INGREDIENT_QUANTITY=500.0
+# Database
+DATABASE_URL=sqlite:///./meal_optimization.db
 
-# Genetic Algorithm Parameters
-GA_POPULATION_SIZE=50
-GA_GENERATIONS=30
-GA_CROSSOVER_RATE=0.7
-GA_MUTATION_RATE=0.2
-
-# Differential Evolution Parameters
-DE_POPULATION_SIZE=15
-DE_MAX_ITERATIONS=100
-
-# Nutritional Constraints
-MIN_PROTEIN_RATIO=0.8
-MIN_CALORIE_RATIO=0.8
-MAX_SODIUM_PER_DAY=2300
-MIN_FIBER_PER_DAY=25
-
-# CORS Configuration
-CORS_ORIGINS=*
-
-# Logging Configuration
-LOG_LEVEL=INFO
+# CORS
+ALLOWED_ORIGINS=["*"]
+ALLOWED_METHODS=["*"]
+ALLOWED_HEADERS=["*"]
 

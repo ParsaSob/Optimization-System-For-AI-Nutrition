@@ -21,10 +21,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration
+# Configuration - using port 3000
 logger.info(f"🚀 Starting Meal Optimization API")
-logger.info(f"🌍 Environment: Development/Production")
-logger.info(f"🔧 PORT env: {os.environ.get('PORT', 'not_set')}")
+logger.info(f"🌍 Environment: Railway deployment - port 3000")
+logger.info(f"🔧 PORT env: {os.environ.get('PORT', '3000')}")
 
 app = FastAPI(
     title="Meal Optimization API",
@@ -77,10 +77,10 @@ async def root():
         "message": "Meal Optimization API is running",
         "status": "healthy",
         "components_ready": db_manager is not None and optimization_engine is not None,
-        "info": {
-            "port_env": os.environ.get("PORT", "not_set"),
+        "railway_info": {
+            "port_env": os.environ.get("PORT", "3000"),
             "python_version": os.environ.get("PYTHON_VERSION", "not_set"),
-            "message": "API is running successfully"
+            "message": "Railway deployment - port 3000"
         }
     }
 
@@ -92,9 +92,9 @@ async def health_check():
         "message": "Meal Optimization API is running",
         "database_ready": db_manager is not None,
         "engine_ready": optimization_engine is not None,
-        "status_info": {
-            "port_env": os.environ.get("PORT", "not_set"),
-            "message": "API is healthy"
+        "railway_status": {
+            "port_env": os.environ.get("PORT", "3000"),
+            "message": "Railway deployment - port 3000"
         }
     }
 

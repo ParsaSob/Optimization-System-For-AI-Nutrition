@@ -25,12 +25,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Railway configuration - get port from environment
-PORT = int(os.environ.get("PORT", 8000))
-HOST = "0.0.0.0"
-
-logger.info(f"🚀 Starting Meal Optimization API on {HOST}:{PORT}")
-logger.info(f"🌍 Environment: PORT={PORT}, HOST={HOST}")
+# Railway configuration - let Railway handle everything
+logger.info(f"🚀 Starting Meal Optimization API")
+logger.info(f"🌍 Environment: Let Railway handle networking")
 logger.info(f"🔧 Railway PORT env: {os.environ.get('PORT', 'not_set')}")
 
 app = FastAPI(
@@ -58,7 +55,7 @@ async def startup_event():
     global db_manager, optimization_engine
     
     try:
-        logger.info(f"🚀 Starting Meal Optimization API on {HOST}:{PORT}")
+        logger.info(f"🚀 Starting Meal Optimization API")
         
         # Initialize database
         db_manager = DatabaseManager()
@@ -83,13 +80,11 @@ async def root():
     return {
         "message": "Meal Optimization API is running",
         "status": "healthy",
-        "port": PORT,
-        "host": HOST,
         "components_ready": db_manager is not None and optimization_engine is not None,
         "railway_info": {
-            "port": PORT,
             "port_env": os.environ.get("PORT", "not_set"),
-            "python_version": os.environ.get("PYTHON_VERSION", "not_set")
+            "python_version": os.environ.get("PYTHON_VERSION", "not_set"),
+            "message": "Railway handles all networking automatically"
         }
     }
 
@@ -102,9 +97,8 @@ async def health_check():
         "database_ready": db_manager is not None,
         "engine_ready": optimization_engine is not None,
         "railway_status": {
-            "port": PORT,
-            "host": HOST,
-            "port_env": os.environ.get("PORT", "not_set")
+            "port_env": os.environ.get("PORT", "not_set"),
+            "message": "Railway handles all networking automatically"
         }
     }
 
@@ -294,9 +288,9 @@ async def get_meal_times():
     }
 
 if __name__ == "__main__":
-    # Get port from environment for Railway
-    port = int(os.environ.get("PORT", 8000))
-    host = "0.0.0.0"
+    # For local development only
+    host = "127.0.0.1"  # Local development
+    port = 8000
     
     logger.info(f"🚀 Starting locally on {host}:{port}")
     

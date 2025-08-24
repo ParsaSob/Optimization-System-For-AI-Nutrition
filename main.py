@@ -11,10 +11,19 @@ from models import (
 from database import DatabaseManager
 import logging
 import asyncio
+import os
+import traceback
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging for Railway
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Railway-specific configuration
+PORT = int(os.environ.get("PORT", 8000))
+HOST = "0.0.0.0"
 
 app = FastAPI(
     title="Meal Optimization API",
@@ -31,23 +40,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize components
-db_manager = DatabaseManager()
-optimization_engine = MealOptimizationEngine()
+# Initialize components with error handling
+db_manager = None
+optimization_engine = None
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize database and optimization engine on startup"""
+    global db_manager, optimization_engine
+    
     try:
+        logger.info(f"Starting Meal Optimization API on {HOST}:{PORT}")
+        
+        # Initialize database
+        db_manager = DatabaseManager()
         await db_manager.initialize()
         logger.info("Database initialized successfully")
+        
+        # Initialize optimization engine
+        optimization_engine = MealOptimizationEngine()
+        logger.info("Optimization engine ready")
+        
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Failed to initialize components: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        # Don't crash the app, continue with limited functionality
+        logger.warning("Continuing with limited functionality")
+
+@app.get("/")
+async def root():
+    """Root endpoint for Railway health check"""
+    return {
+        "message": "Meal Optimization API is running",
+        "status": "healthy",
+        "port": PORT,
+        "host": HOST,
+        "components_ready": db_manager is not None and optimization_engine is not None
+    }
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "message": "Meal Optimization API is running"}
+    return {
+        "status": "healthy", 
+        "message": "Meal Optimization API is running",
+        "database_ready": db_manager is not None,
+        "engine_ready": optimization_engine is not None
+    }
 
 @app.post("/optimize-meal", response_model=MealResponse)
 async def optimize_meal(request: MealRequest):
@@ -146,6 +185,14 @@ async def optimize_rag_meal(request: RAGRequest):
     5. لیست خرید و توصیه‌ها رو برمی‌گردونه
     """
     try:
+        # Check if components are ready
+        if db_manager is None or optimization_engine is None:
+            logger.error("Components not initialized")
+            raise HTTPException(
+                status_code=503, 
+                detail="Service temporarily unavailable - components not initialized"
+            )
+        
         logger.info(f"Received RAG optimization request for user: {request.user_id}")
         logger.info(f"RAG response contains {len(request.rag_response.get('suggestions', []))} meal suggestions")
         
@@ -169,16 +216,27 @@ async def optimize_rag_meal(request: RAGRequest):
         
         return optimized_meal
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"RAG optimization failed: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"RAG optimization failed: {str(e)}")
 
 @app.post("/add-ingredients")
 async def add_ingredients(ingredients: List[Ingredient]):
     """Add new ingredients to the database"""
     try:
+        if db_manager is None:
+            raise HTTPException(
+                status_code=503, 
+                detail="Service temporarily unavailable - database not initialized"
+            )
+        
         await db_manager.add_ingredients(ingredients)
         return {"message": f"Added {len(ingredients)} ingredients successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to add ingredients: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to add ingredients: {str(e)}")
@@ -187,8 +245,16 @@ async def add_ingredients(ingredients: List[Ingredient]):
 async def get_ingredients():
     """Get all available ingredients"""
     try:
+        if db_manager is None:
+            raise HTTPException(
+                status_code=503, 
+                detail="Service temporarily unavailable - database not initialized"
+            )
+        
         ingredients = await db_manager.get_all_ingredients()
         return {"ingredients": ingredients}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get ingredients: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get ingredients: {str(e)}")
@@ -208,14 +274,10 @@ async def get_meal_times():
     }
 
 if __name__ == "__main__":
-    import os
-    
-    # Get port from Railway environment variable
-    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=port,
+        host=HOST,
+        port=PORT,
         reload=False,  # Disable reload in production
         log_level="info"
     )

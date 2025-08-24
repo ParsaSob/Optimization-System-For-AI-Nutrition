@@ -4,11 +4,23 @@
 The Meal Optimization API is a sophisticated system that uses advanced mathematical optimization techniques to create personalized meal plans. It supports 6 meal times and uses multiple optimization algorithms to achieve target nutritional goals.
 
 ## Features
-- **6 Meal Times**: Breakfast, Morning Snack, Lunch, Afternoon Snack, Evening Snack, Dinner
+- **6 Meal Times per Day**: Breakfast, Morning Snack, Lunch, Afternoon Snack, Evening Snack, Dinner
+- **Single Day Planning**: Generates one complete day's worth of meals, not multiple days
 - **Advanced Optimization**: Linear Programming, Genetic Algorithms, Differential Evolution
 - **Personalization**: Dietary restrictions, allergies, preferences
 - **Bilingual Support**: English and Persian ingredient names
 - **Cost Optimization**: Budget constraints and shopping lists
+
+## Meal Plan Structure
+The API generates meal plans for **one single day** with 6 meal times:
+- **Breakfast**: Morning meal (typically 25% of daily calories)
+- **Morning Snack**: Light snack between breakfast and lunch (15% of daily calories)
+- **Lunch**: Main midday meal (30% of daily calories)
+- **Afternoon Snack**: Light snack between lunch and dinner (10% of daily calories)
+- **Evening Snack**: Small snack before dinner (5% of daily calories)
+- **Dinner**: Evening meal (15% of daily calories)
+
+Each meal time contains specific ingredients with calculated nutritional values. The system ensures the total daily nutrition meets your target macros.
 
 ## API Endpoints
 
@@ -116,9 +128,13 @@ Main endpoint for meal optimization.
       "quantity": 200,
       "unit": "grams"
     }
-  ]
+  ],
+  "plan_type": "single_day",
+  "total_meals": 6
 }
 ```
+
+**Note:** The API returns one complete day's worth of meals (6 meal times), not multiple days. Each `meal_plans` array contains all meal times for a single day.
 
 ### 3. Get Ingredients
 ```

@@ -174,7 +174,9 @@ class MealOptimizationEngine:
             'daily_totals': daily_totals,
             'recommendations': self._generate_recommendations(daily_totals, target_macros),
             'cost_estimate': self._estimate_cost(meal_plans),
-            'shopping_list': self._create_shopping_list(meal_plans)
+            'shopping_list': self._create_shopping_list(meal_plans),
+            'plan_type': 'single_day',  # Indicate this is one day's worth of meals
+            'total_meals': len(meal_plans)  # Number of meal times in the day
         }
 
     def _filter_ingredients(self, ingredients: List[Ingredient], preferences: UserPreferences) -> List[Ingredient]:
@@ -978,6 +980,8 @@ class MealOptimizationEngine:
                 'recommendations': self._generate_rag_recommendations(final_macros, target_macros),
                 'cost_estimate': self._estimate_cost(meal_plans),
                 'shopping_list': self._create_shopping_list(meal_plans),
+                'plan_type': 'single_day',  # Indicate this is one day's worth of meals
+                'total_meals': len(meal_plans),  # Number of meal times in the day
                 'rag_enhancement': {
                     'original_macros': current_macros,
                     'added_ingredients': missing_ingredients,
@@ -1218,12 +1222,15 @@ class MealOptimizationEngine:
         return 0
 
     def _create_meal_plans_from_ingredients(self, ingredients) -> List[MealPlan]:
-        """Create meal plans from ingredients"""
+        """Create meal plans from ingredients for a single day"""
         meal_plans = []
         
-        # Distribute ingredients across meal times
+        # Define meal times for a single day
         meal_times = [MealTime.BREAKFAST, MealTime.MORNING_SNACK, MealTime.LUNCH, 
                      MealTime.AFTERNOON_SNACK, MealTime.EVENING_SNACK, MealTime.DINNER]
+        
+        # Distribute ingredients more intelligently across meal times
+        # Instead of simple division, assign ingredients based on meal type and nutritional needs
         
         for i, meal_time in enumerate(meal_times):
             meal_plan = MealPlan(
@@ -1235,41 +1242,66 @@ class MealOptimizationEngine:
                 total_fat=0
             )
             
-            # Assign ingredients to this meal (simple distribution)
-            start_idx = i * len(ingredients) // len(meal_times)
-            end_idx = (i + 1) * len(ingredients) // len(meal_times)
+            # Smart ingredient distribution based on meal time
+            if meal_time == MealTime.BREAKFAST:
+                # Breakfast: protein-rich ingredients
+                suitable_ingredients = [item for item in ingredients if self._is_protein_rich(item)]
+            elif meal_time == MealTime.LUNCH:
+                # Lunch: main meal, balanced ingredients
+                suitable_ingredients = ingredients
+            elif meal_time == MealTime.DINNER:
+                # Dinner: lighter, protein-focused
+                suitable_ingredients = [item for item in ingredients if self._is_protein_rich(item)]
+            else:
+                # Snacks: smaller portions, varied ingredients
+                suitable_ingredients = ingredients
             
-            for j in range(start_idx, end_idx):
-                if j < len(ingredients):
-                    item = ingredients[j]
-                    
-                    if isinstance(item, dict):
-                        # Item is a dict with 'ingredient' and 'quantity_grams'
-                        ingredient = item['ingredient']
-                        quantity = item['quantity_grams']
-                    else:
-                        # Item is an Ingredient object
-                        ingredient = item
-                        quantity = 100  # Default quantity
-                    
-                    meal_item = MealItem(
-                        ingredient=ingredient,
-                        quantity_grams=quantity,
-                        calories=quantity * ingredient.calories_per_100g / 100,
-                        protein=quantity * ingredient.protein_per_100g / 100,
-                        carbs=quantity * ingredient.carbs_per_100g / 100,
-                        fat=quantity * ingredient.fat_per_100g / 100
-                    )
-                    
-                    meal_plan.items.append(meal_item)
-                    meal_plan.total_calories += meal_item.calories
-                    meal_plan.total_protein += meal_item.protein
-                    meal_plan.total_carbs += meal_item.carbs
-                    meal_plan.total_fat += meal_item.fat
+            # Assign ingredients to this meal
+            if suitable_ingredients:
+                # Take a subset of ingredients for this meal
+                start_idx = i * len(suitable_ingredients) // len(meal_times)
+                end_idx = min((i + 1) * len(suitable_ingredients) // len(meal_times), len(suitable_ingredients))
+                
+                for j in range(start_idx, end_idx):
+                    if j < len(suitable_ingredients):
+                        item = suitable_ingredients[j]
+                        
+                        if isinstance(item, dict):
+                            # Item is a dict with 'ingredient' and 'quantity_grams'
+                            ingredient = item['ingredient']
+                            quantity = item['quantity_grams']
+                        else:
+                            # Item is an Ingredient object
+                            ingredient = item
+                            quantity = 100  # Default quantity
+                        
+                        meal_item = MealItem(
+                            ingredient=ingredient,
+                            quantity_grams=quantity,
+                            calories=quantity * ingredient.calories_per_100g / 100,
+                            protein=quantity * ingredient.protein_per_100g / 100,
+                            carbs=quantity * ingredient.carbs_per_100g / 100,
+                            fat=quantity * ingredient.fat_per_100g / 100
+                        )
+                        
+                        meal_plan.items.append(meal_item)
+                        meal_plan.total_calories += meal_item.calories
+                        meal_plan.total_protein += meal_item.protein
+                        meal_plan.total_carbs += meal_item.carbs
+                        meal_plan.total_fat += meal_item.fat
             
             meal_plans.append(meal_plan)
         
         return meal_plans
+    
+    def _is_protein_rich(self, item) -> bool:
+        """Check if an ingredient is protein-rich"""
+        if isinstance(item, dict):
+            ingredient = item['ingredient']
+        else:
+            ingredient = item
+        
+        return ingredient.protein_per_100g > 15  # More than 15g protein per 100g
 
     def _calculate_total_macros(self, ingredients) -> NutritionalTarget:
         """Calculate total macros from all ingredients"""

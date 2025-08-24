@@ -103,6 +103,8 @@ async def optimize_meal(request: MealRequest):
     """
     Optimize meal plan based on given ingredients and target macros
     بهینه‌سازی برنامه غذایی بر اساس مواد غذایی داده شده و ماکروهای هدف
+    
+    Note: Returns one day's worth of meals (multiple meal times), not multiple days
     """
     try:
         logger.info(f"Received optimization request for user: {request.user_id}")
@@ -191,8 +193,10 @@ async def optimize_rag_meal(request: RAGRequest):
     1. داده‌های RAG رو از سایت اصلی دریافت می‌کنه
     2. ماکروهای فعلی رو محاسبه می‌کنه
     3. اگر به target نرسیده، ingredient های اضافی اضافه می‌کنه
-    4. برنامه غذایی کامل 6 وعده‌ای تولید می‌کنه
+    4. برنامه غذایی کامل یک روز (6 وعده) تولید می‌کنه
     5. لیست خرید و توصیه‌ها رو برمی‌گردونه
+    
+    Note: Returns one day's worth of meals (6 meal times), not multiple days
     """
     try:
         # Check if components are ready

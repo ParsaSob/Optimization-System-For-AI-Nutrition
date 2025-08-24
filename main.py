@@ -21,9 +21,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Railway-specific configuration
-# Railway will automatically set PORT environment variable
-PORT = int(os.environ.get("PORT", 8000))
+# Railway configuration - use fixed port for now
+PORT = 8000
 HOST = "0.0.0.0"
 
 logger.info(f"🚀 Starting Meal Optimization API on {HOST}:{PORT}")
@@ -38,7 +37,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure with your main website domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,7 +82,7 @@ async def root():
         "host": HOST,
         "components_ready": db_manager is not None and optimization_engine is not None,
         "railway_info": {
-            "port_from_env": os.environ.get("PORT", "not_set"),
+            "port": PORT,
             "python_version": os.environ.get("PYTHON_VERSION", "not_set")
         }
     }
@@ -98,8 +97,7 @@ async def health_check():
         "engine_ready": optimization_engine is not None,
         "railway_status": {
             "port": PORT,
-            "host": HOST,
-            "port_env": os.environ.get("PORT", "not_set")
+            "host": HOST
         }
     }
 

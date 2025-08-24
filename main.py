@@ -25,9 +25,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Railway configuration - dynamic port assignment
+# Railway configuration - auto-detection
 logger.info(f"🚀 Starting Meal Optimization API")
-logger.info(f"🌍 Environment: Railway deployment - dynamic port")
+logger.info(f"🌍 Environment: Railway deployment - auto-detection")
 logger.info(f"🔧 Railway PORT env: {os.environ.get('PORT', 'not_set')}")
 
 app = FastAPI(
@@ -84,7 +84,7 @@ async def root():
         "railway_info": {
             "port_env": os.environ.get("PORT", "not_set"),
             "python_version": os.environ.get("PYTHON_VERSION", "not_set"),
-            "message": "Railway dynamic port assignment - ${PORT:-8000}"
+            "message": "Railway auto-detection - no Procfile"
         }
     }
 
@@ -98,7 +98,7 @@ async def health_check():
         "engine_ready": optimization_engine is not None,
         "railway_status": {
             "port_env": os.environ.get("PORT", "not_set"),
-            "message": "Railway dynamic port assignment - ${PORT:-8000}"
+            "message": "Railway auto-detection - no Procfile"
         }
     }
 

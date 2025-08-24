@@ -17,8 +17,8 @@ RUN pip install --no-cache-dir -r requirements-minimal.txt
 # Copy application code
 COPY . .
 
-# Expose port 3000 (changed from 8000)
-EXPOSE 3000
+# Expose port (will be set by Railway)
+EXPOSE $PORT
 
-# Run the application on port 3000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3000"]
+# Run the application using Railway's PORT
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT

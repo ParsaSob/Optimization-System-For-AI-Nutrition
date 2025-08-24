@@ -3,17 +3,17 @@
 ## 🔍 **مشکل حل شده:**
 ```
 Error: Invalid value for '--port': '$PORT' is not a valid integer.
-Railway conflicts with port 8000
+Port mismatch between Railway PORT and Dockerfile
 ```
 
-## 🛠️ **راه‌حل صحیح: Dockerfile + Port 3000**
+## 🛠️ **راه‌حل صحیح: Dockerfile + Railway PORT**
 
 ### **کلید حل مشکل:**
-Since you're using a Dockerfile, Railway ignores Procfile. The port is set in the Dockerfile CMD.
+Railway خودش PORT environment variable set می‌کنه (مثل 8080). Dockerfile باید از همون استفاده کنه.
 
 ## 📁 **فایل‌های کلیدی:**
 
-### **1. Dockerfile (Port 3000):**
+### **1. Dockerfile (Using Railway PORT):**
 ```dockerfile
 FROM python:3.11-slim
 
@@ -34,30 +34,30 @@ RUN pip install --no-cache-dir -r requirements-minimal.txt
 # Copy application code
 COPY . .
 
-# Expose port 3000 (changed from 8000)
-EXPOSE 3000
+# Expose port (will be set by Railway)
+EXPOSE $PORT
 
-# Run the application on port 3000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3000"]
+# Run the application using Railway's PORT
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
 **توضیح:**
-- **`EXPOSE 3000`**: Docker exposes port 3000
-- **`CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3000"]`**: Fixed port 3000
-- **No Environment Variables**: بدون dependency روی $PORT
+- **`EXPOSE $PORT`**: Docker exposes Railway's assigned port
+- **`CMD uvicorn main:app --host 0.0.0.0 --port $PORT`**: Uses Railway's PORT environment variable
+- **Dynamic Port**: Railway خودش port رو set می‌کنه
 
 ### **2. main.py:**
 - Railway-friendly logging
 - Better error handling
-- Port 3000 approach
-- Fixed port configuration
+- Dynamic port approach
+- Railway PORT environment variable
 
 ## 🚀 **مراحل Deploy:**
 
 ### **1. Push تغییرات:**
 ```bash
 git add .
-git commit -m "Use port 3000 in Dockerfile for Railway compatibility"
+git commit -m "Use Railway PORT in Dockerfile for proper deployment"
 git push
 ```
 
@@ -87,9 +87,9 @@ Starting service...
 ### **Startup Logs:**
 ```
 🚀 Starting Meal Optimization API
-🌍 Environment: Railway deployment - port 3000
-🔧 PORT env: 3000
-Uvicorn running on http://0.0.0.0:3000
+🌍 Environment: Railway deployment
+🔧 Railway PORT env: 8080
+Uvicorn running on http://0.0.0.0:8080
 ```
 
 ### **Root Endpoint:**
@@ -99,20 +99,20 @@ Uvicorn running on http://0.0.0.0:3000
   "status": "healthy",
   "components_ready": true,
   "railway_info": {
-    "port_env": "3000",
+    "port_env": "8080",
     "python_version": "not_set",
-    "message": "Railway deployment - port 3000"
+    "message": "Railway deployment - using port 8080"
   }
 }
 ```
 
 ## 🔧 **چرا این راه‌حل کار می‌کنه:**
 
-1. **Dockerfile CMD**: Fixed port 3000 بدون dependency روی environment variables
-2. **No Procfile**: Railway از Dockerfile استفاده می‌کنه
-3. **Port 3000**: بدون conflict با Railway defaults
+1. **Railway PORT**: Railway خودش port رو set می‌کنه (مثل 8080)
+2. **Dockerfile CMD**: از Railway PORT استفاده می‌کنه
+3. **No Port Conflicts**: Railway و Dockerfile روی همون port کار می‌کنن
 4. **Host Binding**: Bind به همه interfaces
-5. **Simple Configuration**: کمترین configuration ممکن
+5. **Dynamic Configuration**: Railway خودش port رو handle می‌کنه
 
 ## 🚨 **اگر هنوز مشکل داشت:**
 
@@ -120,58 +120,51 @@ Uvicorn running on http://0.0.0.0:3000
 - Go to Railway dashboard
 - Click on your service
 - Check "Deployments" tab
-- Look for "Uvicorn running on port 3000" message
+- Look for "Uvicorn running on" message with correct port
 
 ### **Check 2: Dockerfile Syntax**
-- Ensure CMD is correct: `["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3000"]`
+- Ensure CMD is correct: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 - Check for typos
-- Verify EXPOSE 3000
+- Verify EXPOSE $PORT
 
-### **Check 3: Build Process**
-- Check if Docker build succeeds
-- Verify requirements-minimal.txt is correct
-- Check for build errors
+### **Check 3: Environment Variables**
+- Check Railway dashboard for PORT environment variable
+- Verify PORT is set (should be something like 8080)
 
 ## 📝 **Success Indicators:**
 - ✅ Docker build successful
-- ✅ No more "$PORT" errors
-- ✅ Uvicorn starts on port 3000
+- ✅ No more port mismatch errors
+- ✅ Uvicorn starts on Railway's PORT
 - ✅ Application responds to requests
 - ✅ Root endpoint returns 200
 - ✅ Health endpoint shows components ready
 
-## 🔧 **Alternative Ports in Dockerfile:**
+## 🔧 **Alternative Approaches:**
 
-### **Option 1: Port 3000 (current)**
+### **Option 1: Use Railway PORT (current)**
 ```dockerfile
-EXPOSE 3000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3000"]
+EXPOSE $PORT
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-### **Option 2: Port 5000**
-```dockerfile
-EXPOSE 5000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5000"]
-```
-
-### **Option 3: Port 8080**
+### **Option 2: Fixed Port (if needed)**
 ```dockerfile
 EXPOSE 8080
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
 ## 🎯 **نکات مهم:**
-1. **Dockerfile CMD**: Fixed port بدون dependency روی environment variables
-2. **No Procfile**: Railway از Dockerfile استفاده می‌کنه
-3. **Port 3000**: بدون conflict با Railway defaults
+1. **Railway PORT**: Railway خودش port رو set می‌کنه
+2. **Dockerfile CMD**: از Railway PORT استفاده می‌کنه
+3. **No Port Conflicts**: Railway و Dockerfile sync هستن
 4. **Host Binding**: Bind به همه interfaces
-5. **Simple Configuration**: کمترین configuration ممکن
+5. **Dynamic Configuration**: Railway خودش handle می‌کنه
 
 ## 🔍 **مزایای این روش:**
 
-- **قابل اعتماد**: Dockerfile fixed port بدون dependency روی environment variables
-- **No Procfile Issues**: Railway از Dockerfile استفاده می‌کنه
-- **Port 3000**: بدون conflict با Railway defaults
+- **قابل اعتماد**: Railway و Dockerfile روی همون port کار می‌کنن
+- **No Port Conflicts**: Railway خودش port رو set می‌کنه
+- **Dynamic Port**: Railway خودش handle می‌کنه
 - **Host Binding**: Bind به همه interfaces
 - **Simple**: ساده و قابل فهم
 
@@ -179,8 +172,8 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 
 1. **Push تغییرات** (Dockerfile + main.py)
 2. **Railway auto-redeploys** از Dockerfile
-3. **Check Railway Logs** برای "Uvicorn running on port 3000"
+3. **Check Railway Logs** برای "Uvicorn running on port 8080"
 4. **Test endpoints** برای functionality
 5. **Monitor performance** برای stability
 
-**حالا تغییرات رو push کن و Railway خودش از Dockerfile استفاده می‌کنه. Port 3000 مشکل Railway رو حل می‌کنه!** 🚀
+**حالا تغییرات رو push کن و Railway خودش از Dockerfile استفاده می‌کنه. Railway PORT و Dockerfile sync میشن!** 🚀

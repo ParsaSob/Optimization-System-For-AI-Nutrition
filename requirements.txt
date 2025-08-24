@@ -8,5 +8,4 @@ scipy==1.11.4
 pulp==2.7.0
 deap==1.4.1
 python-multipart==0.0.6
-python-dotenv==1.0.0
 

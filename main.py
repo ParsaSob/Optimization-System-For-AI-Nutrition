@@ -13,22 +13,18 @@ import logging
 import asyncio
 import os
 import traceback
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
-# Configure logging for Railway
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Railway configuration - auto-detection
+# Configuration
 logger.info(f"🚀 Starting Meal Optimization API")
-logger.info(f"🌍 Environment: Railway deployment - auto-detection")
-logger.info(f"🔧 Railway PORT env: {os.environ.get('PORT', 'not_set')}")
+logger.info(f"🌍 Environment: Development/Production")
+logger.info(f"🔧 PORT env: {os.environ.get('PORT', 'not_set')}")
 
 app = FastAPI(
     title="Meal Optimization API",
@@ -76,15 +72,15 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    """Root endpoint for Railway health check"""
+    """Root endpoint for health check"""
     return {
         "message": "Meal Optimization API is running",
         "status": "healthy",
         "components_ready": db_manager is not None and optimization_engine is not None,
-        "railway_info": {
+        "info": {
             "port_env": os.environ.get("PORT", "not_set"),
             "python_version": os.environ.get("PYTHON_VERSION", "not_set"),
-            "message": "Railway auto-detection - no Procfile"
+            "message": "API is running successfully"
         }
     }
 
@@ -96,9 +92,9 @@ async def health_check():
         "message": "Meal Optimization API is running",
         "database_ready": db_manager is not None,
         "engine_ready": optimization_engine is not None,
-        "railway_status": {
+        "status_info": {
             "port_env": os.environ.get("PORT", "not_set"),
-            "message": "Railway auto-detection - no Procfile"
+            "message": "API is healthy"
         }
     }
 

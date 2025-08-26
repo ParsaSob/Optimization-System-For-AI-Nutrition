@@ -99,10 +99,8 @@ def test_advanced_algorithms():
         if hasattr(optimizer, '_optimize_optuna'):
             test_methods.append('optuna_optimization')
             # PyGMO removed - not compatible with Python 3.11
-        if hasattr(optimizer, '_optimize_nsga2'):
-            test_methods.append('nsga2_optimization')
-        if hasattr(optimizer, '_optimize_pymoo'):
-            test_methods.append('pymoo_optimization')
+        # Platypus removed - not compatible with Python 3.11
+        # PyMOO removed - not compatible with Python 3.11
         
         print(f"🔧 Available optimization methods: {len(test_methods)}")
         print(f"📋 Methods: {', '.join(test_methods)}")

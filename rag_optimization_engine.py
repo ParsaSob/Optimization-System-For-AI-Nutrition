@@ -31,20 +31,11 @@ except ImportError:
 # PyGMO removed - not compatible with Python 3.11
 PYGMO_AVAILABLE = False
 
-try:
-    from platypus import NSGAII, Problem, Real
-    PLATYPUS_AVAILABLE = True
-except ImportError:
-    PLATYPUS_AVAILABLE = False
+# Platypus removed - not compatible with Python 3.11
+PLATYPUS_AVAILABLE = False
 
-try:
-    from pymoo.core.problem import Problem as PymooProblem
-    from pymoo.algorithms.moo.nsga2 import NSGA2
-    from pymoo.optimize import minimize as pymoo_minimize
-    from pymoo.core.variable import Real
-    PYMOO_AVAILABLE = True
-except ImportError:
-    PYMOO_AVAILABLE = False
+# PyMOO removed - not compatible with Python 3.11
+PYMOO_AVAILABLE = False
 
 from models import (
     RAGIngredient, RAGSuggestion, RAGResponse, TargetMacros, 
@@ -80,17 +71,11 @@ class RAGMealOptimizer:
         # PyGMO removed - not compatible with Python 3.11
         print(f"❌ PyGMO not available")
             
-        if PLATYPUS_AVAILABLE:
-            self.optimization_methods['nsga2_optimization'] = self._optimize_nsga2
-            print(f"✅ Platypus NSGA-II optimization available")
-        else:
-            print(f"❌ Platypus not available")
-            
-        if PYMOO_AVAILABLE:
-            self.optimization_methods['pymoo_optimization'] = self._optimize_pymoo
-            print(f"✅ PyMOO optimization available")
-        else:
-            print(f"❌ PyMOO not available")
+        # Platypus removed - not compatible with Python 3.11
+        print(f"❌ Platypus not available")
+        
+        # PyMOO removed - not compatible with Python 3.11
+        print(f"❌ PyMOO not available")
         
         print(f"🔧 Total optimization methods: {len(self.optimization_methods)}")
         
@@ -327,6 +312,45 @@ class RAGMealOptimizer:
         if macro_content > 0:
             return max(10, min(500, (deficit / macro_content) * 100))
         return 100.0
+    
+    def _calculate_ml_compatibility_score(self, ingredient: Dict, existing_profile: np.ndarray, target_macro: str) -> float:
+        """Calculate ML-based compatibility score for ingredient selection"""
+        try:
+            # Create ingredient profile
+            ingredient_profile = np.array([
+                ingredient.get('calories_per_100g', 0),
+                ingredient.get('protein_per_100g', 0),
+                ingredient.get('carbs_per_100g', 0),
+                ingredient.get('fat_per_100g', 0)
+            ])
+            
+            # Normalize profiles
+            ingredient_norm = ingredient_profile / (np.linalg.norm(ingredient_profile) + 1e-8)
+            existing_norm = existing_profile / (np.linalg.norm(existing_profile) + 1e-8)
+            
+            # Calculate cosine similarity
+            similarity = np.dot(ingredient_norm, existing_norm)
+            
+            # For target macro, we want complementary ingredients
+            if target_macro == 'protein':
+                # Prefer ingredients with different protein profiles
+                protein_diff = abs(ingredient.get('protein_per_100g', 0) - existing_profile[1])
+                return (1.0 - similarity) * (protein_diff / 100.0)
+            elif target_macro == 'carbs':
+                # Prefer ingredients with different carb profiles
+                carb_diff = abs(ingredient.get('carbs_per_100g', 0) - existing_profile[2])
+                return (1.0 - similarity) * (carb_diff / 100.0)
+            elif target_macro == 'fat':
+                # Prefer ingredients with different fat profiles
+                fat_diff = abs(ingredient.get('fat_per_100g', 0) - existing_profile[3])
+                return (1.0 - similarity) * (fat_diff / 100.0)
+            else:
+                # General compatibility
+                return 1.0 - similarity
+                
+        except Exception as e:
+            logger.warning(f"ML compatibility score calculation failed: {e}")
+            return 0.5  # Default neutral score
     
     def optimize_single_meal(
         self,
@@ -703,6 +727,14 @@ class RAGMealOptimizer:
             # Avoid adding similar carb sources
             if self._is_similar_carb(new_name, existing_name):
                 return True
+            
+            # Avoid adding the exact same ingredient
+            if new_name == existing_name:
+                return True
+            
+            # Avoid adding similar dairy products
+            if self._is_similar_dairy(new_name, existing_name):
+                return True
         
         return False
     
@@ -743,6 +775,21 @@ class RAGMealOptimizer:
         
         return False
     
+    def _is_similar_dairy(self, new_name: str, existing_name: str) -> bool:
+        """Check if ingredients are similar dairy products"""
+        dairy_groups = [
+            ['yogurt', 'greek yogurt', 'regular yogurt', 'plain yogurt'],
+            ['cheese', 'cottage cheese', 'cheddar', 'mozzarella', 'feta'],
+            ['milk', 'almond milk', 'soy milk', 'oat milk'],
+            ['cream', 'heavy cream', 'sour cream', 'whipping cream']
+        ]
+        
+        for group in dairy_groups:
+            if any(keyword in new_name for keyword in group) and any(keyword in existing_name for keyword in group):
+                return True
+        
+        return False
+    
     def _get_existing_ingredients_from_meal_analysis(self, meal_analysis: Dict) -> List[Dict]:
         """Extract existing ingredients from meal analysis"""
         existing_ingredients = []
@@ -760,11 +807,12 @@ class RAGMealOptimizer:
         available_ingredients = []
         
         if macro_type == 'protein':
-            # High protein, low fat ingredients with variety
+            # High protein, low fat ingredients with variety - avoid repetition
             protein_ingredients = [
-                'Chicken Breast', 'Turkey Breast', 'Cod', 'Greek Yogurt', 
-                'Cottage Cheese', 'Egg Whites', 'Lean Pork', 'Lentils',
-                'Chickpeas', 'Tofu', 'Tempeh', 'Edamame'
+                'Chicken Breast', 'Turkey Breast', 'Cod', 'Tilapia', 'Lean Pork',
+                'Lentils', 'Chickpeas', 'Tofu', 'Tempeh', 'Edamame',
+                'Black Beans', 'Kidney Beans', 'Navy Beans', 'Pinto Beans',
+                'Quinoa', 'Amaranth', 'Spirulina', 'Nutritional Yeast'
             ]
             for name in protein_ingredients:
                 ingredient = self._find_ingredient_by_name(name)
@@ -772,11 +820,13 @@ class RAGMealOptimizer:
                     available_ingredients.append(ingredient)
                     
         elif macro_type == 'carbs':
-            # High carbs, low fat ingredients with variety (avoiding rice)
+            # High carbs, low fat ingredients with variety - avoid repetition
             carb_ingredients = [
-                'Sweet Potato', 'Oatmeal', 'Banana', 'Apple', 'Quinoa',
-                'Buckwheat', 'Millet', 'Amaranth', 'Barley', 'Farro',
-                'Whole Wheat Bread', 'Whole Wheat Pasta'
+                'Oatmeal', 'Banana', 'Apple', 'Orange', 'Pineapple',
+                'Buckwheat', 'Millet', 'Barley', 'Farro', 'Spelt',
+                'Whole Wheat Bread', 'Whole Wheat Pasta', 'Corn',
+                'Butternut Squash', 'Acorn Squash', 'Pumpkin',
+                'Mango', 'Papaya', 'Grapes', 'Berries'
             ]
             for name in carb_ingredients:
                 ingredient = self._find_ingredient_by_name(name)
@@ -784,11 +834,12 @@ class RAGMealOptimizer:
                     available_ingredients.append(ingredient)
                     
         elif macro_type == 'fat':
-            # Moderate fat ingredients with variety
+            # Moderate fat ingredients with variety - avoid repetition
             fat_ingredients = [
-                'Almonds', 'Walnuts', 'Avocado', 'Olive Oil', 'Salmon', 
-                'Eggs', 'Chia Seeds', 'Flax Seeds', 'Pumpkin Seeds',
-                'Sunflower Seeds', 'Cashews', 'Pecans'
+                'Almonds', 'Walnuts', 'Pistachios', 'Hazelnuts', 'Macadamia Nuts',
+                'Chia Seeds', 'Flax Seeds', 'Pumpkin Seeds', 'Sunflower Seeds',
+                'Sesame Seeds', 'Hemp Seeds', 'Pine Nuts', 'Brazil Nuts',
+                'Olive Oil', 'Coconut Oil', 'Avocado Oil', 'Ghee'
             ]
             for name in fat_ingredients:
                 ingredient = self._find_ingredient_by_name(name)
@@ -1946,6 +1997,9 @@ class RAGMealOptimizer:
     ) -> Dict:
         """Optimize ingredient quantities using mathematical optimization"""
         
+        # Set current_ingredients for use in other methods
+        self.current_ingredients = ingredients
+        
         # Try different optimization methods in order of preference
         optimization_order = [
             'genetic_algorithm',
@@ -1957,10 +2011,8 @@ class RAGMealOptimizer:
         if OPTUNA_AVAILABLE:
             optimization_order.append('optuna_optimization')
         # PyGMO removed - not compatible with Python 3.11
-        if PLATYPUS_AVAILABLE:
-            optimization_order.append('nsga2_optimization')
-        if PYMOO_AVAILABLE:
-            optimization_order.append('pymoo_optimization')
+        # Platypus removed - not compatible with Python 3.11
+        # PyMOO removed - not compatible with Python 3.11
         
         # Add hybrid as last resort
         optimization_order.append('hybrid')
@@ -2222,9 +2274,16 @@ class RAGMealOptimizer:
             total_carbs = 0
             total_fat = 0
             
+            # Use current_ingredients if available, otherwise use the ingredients passed to _optimize_quantities
+            ingredients_to_use = getattr(self, 'current_ingredients', None)
+            if ingredients_to_use is None:
+                # Fallback: try to get ingredients from the result or use a default
+                logger.warning("current_ingredients not set, using fallback calculation")
+                return False  # Can't calculate without ingredients
+            
             for i, qty in enumerate(quantities):
-                if i < len(self.current_ingredients):
-                    ingredient = self.current_ingredients[i]
+                if i < len(ingredients_to_use):
+                    ingredient = ingredients_to_use[i]
                     total_calories += qty * ingredient['calories_per_100g'] / 100
                     total_protein += qty * ingredient['protein_per_100g'] / 100
                     total_carbs += qty * ingredient['carbs_per_100g'] / 100
@@ -2523,15 +2582,8 @@ class RAGMealOptimizer:
             
                     # PyGMO removed - not compatible with Python 3.11
             
-            if PLATYPUS_AVAILABLE:
-                result = self._optimize_nsga2(ingredients, target_macros)
-                if result['success']:
-                    return result
-            
-            if PYMOO_AVAILABLE:
-                result = self._optimize_pymoo(ingredients, target_macros)
-                if result['success']:
-                    return result
+                    # Platypus removed - not compatible with Python 3.11
+        # PyMOO removed - not compatible with Python 3.11
             
             # Fallback to standard methods
             result = self._optimize_genetic_algorithm(ingredients, target_macros)
@@ -2616,158 +2668,9 @@ class RAGMealOptimizer:
     
     # PyGMO optimization method removed - not compatible with Python 3.11
     
-    def _optimize_nsga2(
-        self, 
-        ingredients: List[Dict], 
-        target_macros: Dict
-    ) -> Dict:
-        """NSGA-II optimization using Platypus"""
-        if not PLATYPUS_AVAILABLE:
-            return {'success': False, 'method': 'Platypus not available'}
-            
-        try:
-            # Define the problem
-            class OptimizationProblem(Problem):
-                def __init__(self, ingredients, target_macros):
-                    super().__init__(len(ingredients), 1)  # n_vars, n_objectives
-                    self.ingredients = ingredients
-                    self.target_macros = target_macros
-                    
-                    # Define variable types (Real with bounds)
-                    for i in range(len(ingredients)):
-                        self.types[i] = Real(10, 500)  # 10-500g bounds
-                
-                def evaluate(self, solution):
-                    # Get quantities from solution
-                    quantities = solution.variables
-                    
-                    # Calculate total macros
-                    total_calories = sum(quantities[i] * self.ingredients[i]['calories_per_100g'] / 100 
-                                       for i in range(len(self.ingredients)))
-                    total_protein = sum(quantities[i] * self.ingredients[i]['protein_per_100g'] / 100 
-                                      for i in range(len(self.ingredients)))
-                    total_carbs = sum(quantities[i] * self.ingredients[i]['carbs_per_100g'] / 100 
-                                    for i in range(len(self.ingredients)))
-                    total_fat = sum(quantities[i] * self.ingredients[i]['fat_per_100g'] / 100 
-                                  for i in range(len(self.ingredients)))
-                    
-                    # Get carbs target (handle both field names)
-                    carbs_target = self.target_macros.get('carbs', self.target_macros.get('carbohydrates', 0))
-                    
-                    # Calculate deviation from targets
-                    deviation = (
-                        abs(total_calories - self.target_macros['calories']) / self.target_macros['calories'] +
-                        abs(total_protein - self.target_macros['protein']) / max(self.target_macros['protein'], 1) +
-                        abs(total_carbs - carbs_target) / max(carbs_target, 1) +
-                        abs(total_fat - self.target_macros['fat']) / max(self.target_macros['fat'], 1)
-                    )
-                    
-                    solution.objectives[:] = [deviation]
-            
-            # Create the problem
-            problem = OptimizationProblem(ingredients, target_macros)
-            
-            # Create the algorithm
-            algorithm = NSGAII(problem)
-            
-            # Run optimization
-            algorithm.run(100)  # Reduced generations for speed
-            
-            # Get the best solution
-            best_solution = min(algorithm.result, key=lambda x: x.objectives[0])
-            final_quantities = best_solution.variables
-            
-            # Ensure quantities are within bounds
-            final_quantities = [max(10, min(500, q)) for q in final_quantities]
-            
-            return {
-                'success': True,
-                'method': 'NSGA-II (Platypus)',
-                'quantities': final_quantities
-            }
-            
-        except Exception as e:
-            logger.error(f"NSGA-II optimization failed: {e}")
-            return {'success': False, 'method': 'NSGA-II', 'quantities': []}
+    # NSGA-II optimization method removed - not compatible with Python 3.11
     
-    def _optimize_pymoo(
-        self, 
-        ingredients: List[Dict], 
-        target_macros: Dict
-    ) -> Dict:
-        """PyMOO optimization using NSGA-II"""
-        if not PYMOO_AVAILABLE:
-            return {'success': False, 'method': 'PyMOO not available'}
-            
-        try:
-            # Define the problem
-            class OptimizationProblem(PymooProblem):
-                def __init__(self, ingredients, target_macros):
-                    super().__init__(n_var=len(ingredients), n_obj=1, n_constr=0)
-                    self.ingredients = ingredients
-                    self.target_macros = target_macros
-                
-                def _evaluate(self, x, out, *args, **kwargs):
-                    # Calculate total macros
-                    total_calories = sum(x[i] * self.ingredients[i]['calories_per_100g'] / 100 
-                                       for i in range(len(self.ingredients)))
-                    total_protein = sum(x[i] * self.ingredients[i]['protein_per_100g'] / 100 
-                                      for i in range(len(self.ingredients)))
-                    total_carbs = sum(x[i] * self.ingredients[i]['carbs_per_100g'] / 100 
-                                    for i in range(len(self.ingredients)))
-                    total_fat = sum(x[i] * self.ingredients[i]['fat_per_100g'] / 100 
-                                  for i in range(len(self.ingredients)))
-                    
-                    # Get carbs target (handle both field names)
-                    carbs_target = self.target_macros.get('carbs', self.target_macros.get('carbohydrates', 0))
-                    
-                    # Calculate deviation from targets
-                    deviation = (
-                        abs(total_calories - self.target_macros['calories']) / self.target_macros['calories'] +
-                        abs(total_protein - self.target_macros['protein']) / max(self.target_macros['protein'], 1) +
-                        abs(total_carbs - carbs_target) / max(carbs_target, 1) +
-                        abs(total_fat - self.target_macros['fat']) / max(self.target_macros['fat'], 1)
-                    )
-                    
-                    out['F'] = [deviation]
-                
-                def _calc_constr(self, x, out, *args, **kwargs):
-                    # No constraints in this problem
-                    pass
-                
-                def _calc_obj(self, x, out, *args, **kwargs):
-                    # No objectives in this problem
-                    pass
-            
-            # Define the problem
-            problem = OptimizationProblem(ingredients, target_macros)
-            
-            # Define the algorithm
-            algorithm = NSGA2(pop_size=50)  # Smaller population for speed
-            
-            # Optimize
-            res = pymoo_minimize(
-                problem,
-                algorithm,
-                ('n_gen', 50),  # Reduced generations for speed
-                seed=42
-            )
-            
-            # Get the best individual
-            final_quantities = res.X[0]
-            
-            # Ensure quantities are within bounds
-            final_quantities = [max(10, min(500, q)) for q in final_quantities]
-            
-            return {
-                'success': True,
-                'method': 'PyMOO NSGA-II',
-                'quantities': final_quantities
-            }
-            
-        except Exception as e:
-            logger.error(f"PyMOO optimization failed: {e}")
-            return {'success': False, 'method': 'PyMOO', 'quantities': []}
+    # PyMOO optimization method removed - not compatible with Python 3.11
     
     def _evaluate_genetic_fitness(self, individual):
         """Evaluate fitness for genetic algorithm (placeholder - will be overridden)"""
@@ -2824,16 +2727,27 @@ class RAGMealOptimizer:
         final_meal: Dict, 
         target_macros: Dict
     ) -> Dict:
-        """Check if targets are achieved within ±10% tolerance"""
-        tolerance = 0.1
+        """Check if targets are achieved within ±10% tolerance for precise optimization"""
+        tolerance = 0.10  # Reduced from 0.15 to 0.10 for more precise results
         
         # Handle both 'carbs' and 'carbohydrates' field names
         carbs_target = target_macros.get('carbs', target_macros.get('carbohydrates', 0))
         
-        calories_achieved = abs(final_meal['calories'] - target_macros.get('calories', 0)) <= target_macros.get('calories', 1) * tolerance
-        protein_achieved = abs(final_meal['protein'] - target_macros.get('protein', 0)) <= target_macros.get('protein', 1) * tolerance
-        carbs_achieved = abs(final_meal['carbs'] - carbs_target) <= carbs_target * tolerance
-        fat_achieved = abs(final_meal['fat'] - target_macros.get('fat', 0)) <= target_macros.get('fat', 1) * tolerance
+        # Calculate absolute differences
+        cal_diff = abs(final_meal['calories'] - target_macros.get('calories', 0))
+        protein_diff = abs(final_meal['protein'] - target_macros.get('protein', 0))
+        carbs_diff = abs(final_meal['carbs'] - carbs_target)
+        fat_diff = abs(final_meal['fat'] - target_macros.get('fat', 0))
+        
+        # Check if within tolerance
+        calories_achieved = cal_diff <= target_macros.get('calories', 1) * tolerance
+        protein_achieved = protein_diff <= target_macros.get('protein', 1) * tolerance
+        carbs_achieved = carbs_diff <= carbs_target * tolerance
+        fat_achieved = fat_diff <= target_macros.get('fat', 1) * tolerance
+        
+        # Debug logging
+        logger.info(f"Target achievement check: cal={calories_achieved}, protein={protein_achieved}, carbs={carbs_achieved}, fat={fat_achieved}")
+        logger.info(f"Deviations: cal={cal_diff:.1f}, protein={protein_diff:.1f}, carbs={carbs_diff:.1f}, fat={fat_diff:.1f}")
         
         overall_achieved = calories_achieved and protein_achieved and carbs_achieved and fat_achieved
         
@@ -2842,7 +2756,13 @@ class RAGMealOptimizer:
             'protein_achieved': protein_achieved,
             'carbs_achieved': carbs_achieved,
             'fat_achieved': fat_achieved,
-            'overall_achieved': overall_achieved
+            'overall_achieved': overall_achieved,
+            'deviations': {
+                'calories': round(cal_diff, 1),
+                'protein': round(protein_diff, 1),
+                'carbs': round(carbs_diff, 1),
+                'fat': round(fat_diff, 1)
+            }
         }
     
     def _calculate_enhancement_details(

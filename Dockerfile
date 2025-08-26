@@ -29,12 +29,13 @@ ENV PYTHONPATH=/app
 ENV FLASK_APP=backend_server.py
 ENV FLASK_ENV=production
 
-# Expose port
-EXPOSE 5000
+# Expose port (Render will override this)
+EXPOSE 10000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
+    CMD curl -f http://localhost:$PORT/health || exit 1
 
 # Start command for production (Render/Railway)
-CMD gunicorn --bind 0.0.0.0:$PORT backend_server:app
+# Use gunicorn configuration file for better stability
+CMD gunicorn -c gunicorn.conf.py backend_server:app

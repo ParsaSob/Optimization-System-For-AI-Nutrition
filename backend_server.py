@@ -494,5 +494,17 @@ if __name__ == '__main__':
     
     print(f"🌐 Server will start on port: {port}")
     print(f"🔧 Debug mode: {debug_mode}")
+    print(f"🌍 Bind address: 0.0.0.0")
     
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    try:
+        app.run(host='0.0.0.0', port=port, debug=debug_mode, threaded=True)
+    except Exception as e:
+        print(f"❌ Error starting server: {e}")
+        # Try alternative port if main port fails
+        try:
+            alt_port = port + 1 if port < 65535 else 5000
+            print(f"🔄 Trying alternative port: {alt_port}")
+            app.run(host='0.0.0.0', port=alt_port, debug=debug_mode, threaded=True)
+        except Exception as e2:
+            print(f"❌ Failed to start on alternative port: {e2}")
+            exit(1)

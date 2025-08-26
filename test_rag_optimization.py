@@ -1,201 +1,239 @@
 #!/usr/bin/env python3
 """
-Test script for RAG-based meal optimization
+Test script for RAG Meal Optimization System
+Demonstrates the complete workflow from RAG response to optimized meal
 """
 
-import asyncio
+import requests
 import json
-import httpx
-from models import NutritionalTarget, UserPreferences
+import time
 
-# Sample RAG response
-SAMPLE_RAG_RESPONSE = {
-    "suggestions": [
-        {
-            "mealTitle": "Persian Lunch Kabab Koobideh",
-            "description": "High in protein and calories, suitable for muscle gain goals for a moderately active individual. Includes a balance of meat for protein and rice for energy, with vegetables for micronutrients.",
-            "ingredients": [
-                {
-                    "name": "Ground Beef",
-                    "amount": 200,
-                    "unit": "g",
-                    "calories": 400,
-                    "protein": 40,
-                    "carbs": 0,
-                    "fat": 30,
-                    "macrosString": "400 cal, 40g protein, 0g carbs, 30g fat"
-                },
-                {
-                    "name": "Onion",
-                    "amount": 50,
-                    "unit": "g",
-                    "calories": 20,
-                    "protein": 1,
-                    "carbs": 5,
-                    "fat": 0,
-                    "macrosString": "20 cal, 1g protein, 5g carbs, 0g fat"
-                },
-                {
-                    "name": "Saffron",
-                    "amount": 2,
-                    "unit": "g",
-                    "calories": 1,
-                    "protein": 0,
-                    "carbs": 0,
-                    "fat": 0,
-                    "macrosString": "1 cal, 0g protein, 0g carbs, 0g fat"
-                },
-                {
-                    "name": "Butter",
-                    "amount": 25,
-                    "unit": "g",
-                    "calories": 180,
-                    "protein": 0,
-                    "carbs": 0,
-                    "fat": 20,
-                    "macrosString": "180 cal, 0g protein, 0g carbs, 20g fat"
-                },
-                {
-                    "name": "Basmati Rice",
-                    "amount": 200,
-                    "unit": "g",
-                    "calories": 720,
-                    "protein": 13.3,
-                    "carbs": 160,
-                    "fat": 2.7,
-                    "macrosString": "720 cal, 13.3g protein, 160g carbs, 2.7g fat"
-                },
-                {
-                    "name": "Grilled Tomato",
-                    "amount": 50,
-                    "unit": "g",
-                    "calories": 10,
-                    "protein": 0.5,
-                    "carbs": 2.5,
-                    "fat": 0,
-                    "macrosString": "10 cal, 0.5g protein, 2.5g carbs, 0g fat"
-                }
-            ],
-            "totalCalories": 1331,
-            "totalProtein": 54.8,
-            "totalCarbs": 167.5,
-            "totalFat": 52.7,
-            "nutritionalNotes": "High protein content supports muscle synthesis, with sufficient carbs for energy during workouts. Fat content aids in hormone regulation crucial for muscle growth.",
-            "instructions": "Cook ingredients according to preference. Season to taste and serve."
-        }
-    ],
-    "success": True,
-    "message": None
-}
+# Server configuration
+BASE_URL = "http://localhost:5000"
 
-# Target macros (higher than RAG provides)
-TARGET_MACROS = NutritionalTarget(
-    calories=2000,
-    protein=150,
-    carbohydrates=200,
-    fat=65
-)
+def test_health_check():
+    """Test health check endpoint"""
+    print("🔍 Testing health check...")
+    try:
+        response = requests.get(f"{BASE_URL}/health")
+        if response.status_code == 200:
+            print("✅ Health check passed")
+            print(f"   Response: {response.json()}")
+        else:
+            print(f"❌ Health check failed: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Health check error: {e}")
+    print()
 
-# User preferences
-USER_PREFERENCES = UserPreferences(
-    dietary_restrictions=[],
-    allergies=[],
-    preferred_cuisines=["persian", "mediterranean"],
-    calorie_preference="moderate",
-    protein_preference="high",
-    carb_preference="moderate",
-    fat_preference="moderate"
-)
-
-async def test_rag_optimization():
-    """Test the RAG optimization endpoint"""
-    print("🚀 Testing RAG-based Meal Optimization")
-    print("=" * 50)
+def test_rag_optimization():
+    """Test the complete RAG optimization workflow"""
+    print("🔍 Testing RAG meal optimization...")
     
-    async with httpx.AsyncClient() as client:
-        try:
-            # Test RAG optimization endpoint
-            print("📝 Testing RAG meal optimization...")
+    # Sample RAG response (as specified by user)
+    rag_response = {
+        "suggestions": [
+            {
+                "mealTitle": "Persian Chicken and Rice",
+                "description": "A traditional Persian meal with chicken and aromatic rice",
+                "ingredients": [
+                    {
+                        "name": "Chicken Breast",
+                        "amount": 150,
+                        "unit": "grams",
+                        "calories": 247.5,
+                        "protein": 46.5,
+                        "carbs": 0,
+                        "fat": 5.4
+                    },
+                    {
+                        "name": "Basmati Rice",
+                        "amount": 100,
+                        "unit": "grams",
+                        "calories": 130,
+                        "protein": 2.7,
+                        "carbs": 28,
+                        "fat": 0.3
+                    },
+                    {
+                        "name": "Olive Oil",
+                        "amount": 15,
+                        "unit": "grams",
+                        "calories": 132.6,
+                        "protein": 0,
+                        "carbs": 0,
+                        "fat": 15
+                    },
+                    {
+                        "name": "Onion",
+                        "amount": 50,
+                        "unit": "grams",
+                        "calories": 20,
+                        "protein": 0.5,
+                        "carbs": 4.7,
+                        "fat": 0.1
+                    }
+                ],
+                "totalCalories": 530.1,
+                "totalProtein": 49.7,
+                "totalCarbs": 32.7,
+                "totalFat": 20.8
+            }
+        ],
+        "success": True,
+        "message": "Persian meal suggestion generated successfully"
+    }
+    
+    # Target macros for optimization
+    target_macros = {
+        "calories": 800,
+        "protein": 60,
+        "carbohydrates": 80,
+        "fat": 30
+    }
+    
+    # User preferences
+    user_preferences = {
+        "dietary_restrictions": ["halal"],
+        "allergies": [],
+        "preferred_cuisines": ["persian", "mediterranean"],
+        "calorie_preference": "moderate",
+        "protein_preference": "high",
+        "carb_preference": "moderate",
+        "fat_preference": "low"
+    }
+    
+    # Request payload
+    request_data = {
+        "rag_response": rag_response,
+        "target_macros": target_macros,
+        "user_preferences": user_preferences,
+        "user_id": "user_123",
+        "meal_type": "lunch"
+    }
+    
+    try:
+        print("📤 Sending optimization request...")
+        print(f"   Target calories: {target_macros['calories']}")
+        print(f"   Target protein: {target_macros['protein']}g")
+        print(f"   Target carbs: {target_macros['carbohydrates']}g")
+        print(f"   Target fat: {target_macros['fat']}g")
+        print()
+        
+        # Test advanced RAG optimization
+        response = requests.post(
+            f"{BASE_URL}/optimize-single-meal-rag-advanced",
+            json=request_data,
+            headers={"Content-Type": "application/json"}
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            print("✅ RAG optimization successful!")
+            print()
             
-            response = await client.post(
-                "http://localhost:8000/optimize-rag-meal",
-                json={
-                    "rag_response": SAMPLE_RAG_RESPONSE,
-                    "target_macros": TARGET_MACROS.model_dump(),
-                    "user_preferences": USER_PREFERENCES.model_dump(),
-                    "user_id": "test_user_rag"
-                },
-                timeout=30.0
-            )
+            # Display optimization result
+            print("📊 OPTIMIZATION RESULT:")
+            print(f"   Method: {result['optimization_result']['method']}")
+            print(f"   Success: {result['optimization_result']['success']}")
+            print(f"   Target achieved: {result['optimization_result']['target_achieved']}")
+            print(f"   Computation time: {result['optimization_result']['computation_time']}s")
+            print()
             
-            if response.status_code == 200:
-                result = response.json()
-                print("✅ RAG optimization successful!")
+            # Display meal details
+            if result['meal']:
+                meal = result['meal']
+                print("🍽️  OPTIMIZED MEAL:")
+                print(f"   Meal time: {meal['meal_time']}")
+                print(f"   Total calories: {meal['total_calories']}")
+                print(f"   Total protein: {meal['total_protein']}g")
+                print(f"   Total carbs: {meal['total_carbs']}g")
+                print(f"   Total fat: {meal['total_fat']}g")
+                print()
                 
-                # Display results
-                optimization_result = result['optimization_result']
-                print(f"Optimization method: {optimization_result['optimization_method']}")
-                print(f"Target achieved: {optimization_result['target_achieved']}")
-                
-                # Show meal plans
-                meal_plans = result['meal_plans']
-                print(f"\n📋 Generated {len(meal_plans)} meal plans:")
-                
-                for meal_plan in meal_plans:
-                    meal_time = meal_plan['meal_time']
-                    total_calories = meal_plan['total_calories']
-                    total_protein = meal_plan['total_protein']
-                    total_carbs = meal_plan['total_carbs']
-                    total_fat = meal_plan['total_fat']
-                    
-                    print(f"\n🍽️ {meal_time.title()}:")
-                    print(f"   Calories: {total_calories:.1f}")
-                    print(f"   Protein: {total_protein:.1f}g")
-                    print(f"   Carbs: {total_carbs:.1f}g")
-                    print(f"   Fat: {total_fat:.1f}g")
-                    
-                    if meal_plan['items']:
-                        print("   Ingredients:")
-                        for item in meal_plan['items']:
-                            ingredient_name = item['ingredient']['name']
-                            quantity = item['quantity_grams']
-                            print(f"     • {ingredient_name}: {quantity:.1f}g")
-                
-                # Show daily totals
-                daily_totals = result['daily_totals']
-                print(f"\n📊 Daily Totals:")
-                print(f"   Calories: {daily_totals['calories']:.1f} / {TARGET_MACROS.calories}")
-                print(f"   Protein: {daily_totals['protein']:.1f}g / {TARGET_MACROS.protein}g")
-                print(f"   Carbs: {daily_totals['carbohydrates']:.1f}g / {TARGET_MACROS.carbohydrates}g")
-                print(f"   Fat: {daily_totals['fat']:.1f}g / {TARGET_MACROS.fat}g")
-                
-                # Show RAG enhancement info
-                if 'rag_enhancement' in result:
-                    enhancement = result['rag_enhancement']
-                    print(f"\n🔧 RAG Enhancement:")
-                    print(f"   Original macros: {enhancement['original_macros']}")
-                    print(f"   Added ingredients: {len(enhancement['added_ingredients'])}")
-                    print(f"   Notes: {enhancement['enhancement_notes']}")
-                
-                # Show recommendations
-                recommendations = result['recommendations']
-                print(f"\n💡 Recommendations:")
-                for rec in recommendations:
+                print("📝 MEAL ITEMS:")
+                for item in meal['items']:
+                    print(f"   • {item['ingredient']}: {item['quantity_grams']}g")
+                    print(f"     Calories: {item['calories']}, Protein: {item['protein']}g, Carbs: {item['carbs']}g, Fat: {item['fat']}g")
+                print()
+            
+            # Display target achievement
+            if result['target_achievement']:
+                achievement = result['target_achievement']
+                print("🎯 TARGET ACHIEVEMENT:")
+                print(f"   Calories achieved: {achievement['calories_achieved']}")
+                print(f"   Protein achieved: {achievement['protein_achieved']}")
+                print(f"   Carbs achieved: {achievement['carbs_achieved']}")
+                print(f"   Fat achieved: {achievement['fat_achieved']}")
+                print()
+            
+            # Display recommendations
+            if result.get('recommendations'):
+                print("💡 RECOMMENDATIONS:")
+                for rec in result['recommendations']:
                     print(f"   • {rec}")
-                
-                # Show shopping list
-                shopping_list = result['shopping_list']
-                print(f"\n🛒 Shopping List:")
-                for item in shopping_list:
-                    print(f"   • {item['name']}: {item['quantity']:.1f} {item['unit']}")
-                
-            else:
-                print(f"❌ RAG optimization failed: {response.status_code}")
-                print(f"Error: {response.text}")
-                
-        except Exception as e:
-            print(f"❌ Test failed with error: {e}")
+                print()
+            
+            # Display RAG enhancement details
+            if result.get('rag_enhancement'):
+                enhancement = result['rag_enhancement']
+                print("🔧 RAG ENHANCEMENT:")
+                print(f"   Method: {enhancement.get('enhancement_method', 'N/A')}")
+                print(f"   Original ingredients: {enhancement.get('original_ingredients', 'N/A')}")
+                print(f"   Supplements added: {enhancement.get('supplements_added', 'N/A')}")
+                print(f"   Total ingredients: {enhancement.get('total_ingredients', 'N/A')}")
+                print()
+            
+        else:
+            print(f"❌ RAG optimization failed: {response.status_code}")
+            print(f"   Error: {response.text}")
+            
+    except Exception as e:
+        print(f"❌ RAG optimization error: {e}")
+    
+    print()
+
+def test_ingredients_endpoints():
+    """Test ingredients endpoints"""
+    print("🔍 Testing ingredients endpoints...")
+    
+    try:
+        # Test regular ingredients
+        response = requests.get(f"{BASE_URL}/api/ingredients")
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Regular ingredients loaded: {data['total_count']} ingredients")
+        else:
+            print(f"❌ Regular ingredients failed: {response.status_code}")
+        
+        # Test RAG ingredients
+        response = requests.get(f"{BASE_URL}/api/rag-ingredients")
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ RAG ingredients loaded: {data['total_count']} ingredients")
+        else:
+            print(f"❌ RAG ingredients failed: {response.status_code}")
+            
+    except Exception as e:
+        print(f"❌ Ingredients test error: {e}")
+    
+    print()
+
+def main():
+    """Main test function"""
+    print("🚀 RAG Meal Optimization System Test")
+    print("=" * 50)
+    print()
+    
+    # Wait for server to start
+    print("⏳ Waiting for server to start...")
+    time.sleep(2)
+    
+    # Run tests
+    test_health_check()
+    test_ingredients_endpoints()
+    test_rag_optimization()
+    
+    print("✨ Test completed!")
 
 if __name__ == "__main__":
-    print("Starting RAG optimization test...")
-    asyncio.run(test_rag_optimization())
+    main()

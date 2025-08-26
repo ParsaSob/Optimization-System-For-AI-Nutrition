@@ -8,4 +8,6 @@ scipy==1.11.4
 pulp==2.7.0
 deap==1.4.1
 python-multipart==0.0.6
+flask==3.0.0
+flask-cors==4.0.0
 

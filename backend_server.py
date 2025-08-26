@@ -9,8 +9,12 @@ from flask_cors import CORS
 import json
 import asyncio
 from typing import Dict, List, Any
-from models import NutritionalTarget, UserPreferences, MealTime, Ingredient, MealItem, MealPlan
+from models import (
+    NutritionalTarget, UserPreferences, MealTime, Ingredient, MealItem, MealPlan,
+    SingleMealOptimizationRequest, SingleMealOptimizationResponse
+)
 from optimization_engine import SingleMealOptimizer
+from rag_optimization_engine import RAGMealOptimizer
 import time
 
 app = Flask(__name__)
@@ -331,6 +335,7 @@ class RealMealOptimizer:
 # Initialize optimizers
 optimizer = RealMealOptimizer()
 single_meal_optimizer = SingleMealOptimizer()
+rag_meal_optimizer = RAGMealOptimizer()
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -398,6 +403,43 @@ def optimize_single_meal_rag():
             "status": "error"
         }), 500
 
+@app.route('/optimize-single-meal-rag-advanced', methods=['POST'])
+def optimize_single_meal_rag_advanced():
+    """Advanced RAG-based single meal optimization endpoint"""
+    try:
+        request_data = request.get_json()
+        
+        if not request_data:
+            return jsonify({"error": "No request data provided"}), 400
+        
+        # Validate required fields
+        required_fields = ['rag_response', 'target_macros', 'user_preferences', 'meal_type']
+        for field in required_fields:
+            if field not in request_data:
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+        
+        # Extract data
+        rag_response = request_data['rag_response']
+        target_macros = request_data['target_macros']
+        user_preferences = request_data['user_preferences']
+        meal_type = request_data['meal_type']
+        
+        # Run advanced RAG meal optimization
+        result = rag_meal_optimizer.optimize_single_meal(
+            rag_response=rag_response,
+            target_macros=target_macros,
+            user_preferences=user_preferences,
+            meal_type=meal_type
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            "error": f"Advanced RAG meal optimization failed: {str(e)}",
+            "status": "error"
+        }), 500
+
 @app.route('/api/ingredients', methods=['GET'])
 def get_ingredients():
     """Get available ingredients from database"""
@@ -422,13 +464,27 @@ def get_ingredients():
     except Exception as e:
         return jsonify({"error": f"Failed to load ingredients: {str(e)}"}), 500
 
+@app.route('/api/rag-ingredients', methods=['GET'])
+def get_rag_ingredients():
+    """Get RAG-specific ingredients from database"""
+    try:
+        ingredients = rag_meal_optimizer.ingredients_db
+        return jsonify({
+            "ingredients": ingredients,
+            "total_count": len(ingredients)
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to load RAG ingredients: {str(e)}"}), 500
+
 if __name__ == '__main__':
     print("🚀 Starting Persian Meal Optimization Backend Server...")
     print("📍 Endpoints available:")
     print("   GET  /health - Health check")
     print("   POST /optimize-single-meal - Main optimization endpoint")
     print("   POST /optimize-single-meal-rag - Single meal RAG optimization")
+    print("   POST /optimize-single-meal-rag-advanced - Advanced RAG optimization")
     print("   GET  /api/ingredients - Get available ingredients")
+    print("   GET  /api/rag-ingredients - Get RAG ingredients")
     print("=" * 60)
     
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -102,10 +102,109 @@ class IngredientDatabase(BaseModel):
     last_updated: str
     version: str = "1.0.0"
 
+# New RAG-specific models
 class RAGIngredient(BaseModel):
     """Ingredient from RAG response with nutritional data"""
     name: str = Field(..., description="Ingredient name")
-    amount: float = Field(..., description="Amount in grams")
+    amount: Union[str, float] = Field(..., description="Amount in grams or string")
+    unit: str = Field(..., description="Unit of measurement")
+    calories: float = Field(..., description="Calories for the amount")
+    protein: float = Field(..., description="Protein in grams for the amount")
+    carbs: float = Field(..., description="Carbohydrates in grams for the amount")
+    fat: float = Field(..., description="Fat in grams for the amount")
+
+class RAGSuggestion(BaseModel):
+    """Suggestion from RAG response"""
+    mealTitle: Optional[str] = Field(None, description="Title of the meal")
+    description: Optional[str] = Field(None, description="Description of the meal")
+    ingredients: List[RAGIngredient] = Field(..., description="List of ingredients")
+    totalCalories: Optional[float] = Field(None, description="Total calories")
+    totalProtein: Optional[float] = Field(None, description="Total protein")
+    totalCarbs: Optional[float] = Field(None, description="Total carbohydrates")
+    totalFat: Optional[float] = Field(None, description="Total fat")
+    instructions: Optional[str] = Field(None, description="Cooking instructions")
+
+class RAGResponse(BaseModel):
+    """RAG response containing meal suggestions"""
+    suggestions: List[RAGSuggestion] = Field(..., description="List of meal suggestions")
+    success: bool = Field(..., description="Whether RAG request was successful")
+    message: Optional[str] = Field(None, description="Additional message from RAG")
+
+class TargetMacros(BaseModel):
+    """Target macros for optimization"""
+    calories: float = Field(..., description="Target calories")
+    protein: float = Field(..., description="Target protein in grams")
+    carbohydrates: float = Field(..., description="Target carbohydrates in grams")
+    fat: float = Field(..., description="Target fat in grams")
+
+class UserPreferencesRAG(BaseModel):
+    """User preferences for RAG optimization"""
+    dietary_restrictions: List[str] = Field(default_factory=list, description="Dietary restrictions")
+    allergies: List[str] = Field(default_factory=list, description="Food allergies")
+    preferred_cuisines: List[str] = Field(default_factory=list, description="Preferred cuisines")
+    calorie_preference: str = Field("moderate", description="low, moderate, high")
+    protein_preference: str = Field("moderate", description="low, moderate, high")
+    carb_preference: str = Field("moderate", description="low, moderate, high")
+    fat_preference: str = Field("moderate", description="low, moderate, high")
+
+class SingleMealOptimizationRequest(BaseModel):
+    """Request for single meal optimization with RAG"""
+    rag_response: RAGResponse = Field(..., description="RAG response with ingredients")
+    target_macros: TargetMacros = Field(..., description="Target macros for the meal")
+    user_preferences: UserPreferencesRAG = Field(..., description="User preferences")
+    user_id: str = Field(..., description="User identifier")
+    meal_type: str = Field(..., description="Type of meal")
+
+class MealItemOptimized(BaseModel):
+    """Optimized meal item with quantity and nutritional info"""
+    ingredient: str = Field(..., description="Ingredient name")
+    quantity_grams: float = Field(..., description="Quantity in grams")
+    calories: float = Field(..., description="Calculated calories")
+    protein: float = Field(..., description="Calculated protein")
+    carbs: float = Field(..., description="Calculated carbohydrates")
+    fat: float = Field(..., description="Calculated fat")
+
+class MealOptimized(BaseModel):
+    """Optimized meal with all items"""
+    meal_time: str = Field(..., description="Meal time")
+    total_calories: float = Field(..., description="Total calories")
+    total_protein: float = Field(..., description="Total protein")
+    total_carbs: float = Field(..., description="Total carbohydrates")
+    total_fat: float = Field(..., description="Total fat")
+    items: List[MealItemOptimized] = Field(..., description="List of meal items")
+
+class TargetAchievement(BaseModel):
+    """Target achievement status"""
+    calories_achieved: bool = Field(..., description="Whether calories target was achieved")
+    protein_achieved: bool = Field(..., description="Whether protein target was achieved")
+    carbs_achieved: bool = Field(..., description="Whether carbs target was achieved")
+    fat_achieved: bool = Field(..., description="Whether fat target was achieved")
+    notes: Optional[str] = Field(None, description="Additional notes")
+
+class RAGEnhancement(BaseModel):
+    """RAG enhancement details"""
+    original_macros: Optional[TargetMacros] = Field(None, description="Original macros from RAG")
+    added_ingredients: Optional[List[RAGIngredient]] = Field(None, description="Ingredients added during optimization")
+    enhancement_notes: Optional[str] = Field(None, description="Enhancement notes")
+    enhancement_method: Optional[str] = Field(None, description="Method used for enhancement")
+    original_ingredients: Optional[int] = Field(None, description="Number of original ingredients")
+    supplements_added: Optional[int] = Field(None, description="Number of supplements added")
+    total_ingredients: Optional[int] = Field(None, description="Total number of ingredients")
+
+class SingleMealOptimizationResponse(BaseModel):
+    """Response for single meal optimization"""
+    optimization_result: Dict[str, Any] = Field(..., description="Optimization result details")
+    meal: MealOptimized = Field(..., description="Optimized meal details")
+    target_achievement: TargetAchievement = Field(..., description="Target achievement status")
+    recommendations: List[str] = Field(..., description="Recommendations")
+    rag_enhancement: RAGEnhancement = Field(..., description="RAG enhancement details")
+    user_id: Optional[str] = Field(None, description="User identifier")
+
+# Legacy models for backward compatibility
+class RAGIngredient(BaseModel):
+    """Ingredient from RAG response with nutritional data"""
+    name: str = Field(..., description="Ingredient name")
+    amount: Union[str, float] = Field(..., description="Amount in grams or string")
     unit: str = Field(..., description="Unit of measurement")
     calories: float = Field(..., description="Calories for the amount")
     protein: float = Field(..., description="Protein in grams for the amount")

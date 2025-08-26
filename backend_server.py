@@ -8,6 +8,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
 import asyncio
+import os
 from typing import Dict, List, Any
 from models import (
     NutritionalTarget, UserPreferences, MealTime, Ingredient, MealItem, MealPlan,
@@ -486,5 +487,12 @@ if __name__ == '__main__':
     print("   GET  /api/ingredients - Get available ingredients")
     print("   GET  /api/rag-ingredients - Get RAG ingredients")
     print("=" * 60)
+
+    # Get port from environment variable (for Render) or use default
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('FLASK_ENV') == 'development'
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    print(f"🌐 Server will start on port: {port}")
+    print(f"🔧 Debug mode: {debug_mode}")
+    
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)

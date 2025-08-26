@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: rag-meal-optimizer
+    env: python
+    plan: free
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT backend_server:app
+    envVars:
+      - key: FLASK_APP
+        value: backend_server.py
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHONPATH
+        value: .
+    healthCheckPath: /health
+    autoDeploy: true

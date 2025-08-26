@@ -25,13 +25,10 @@ coverage.xml
 .hypothesis
 
 # Virtual environments
-.env
-.venv
-env/
 venv/
 ENV/
-env.bak/
-venv.bak/
+env/
+rag_venv/
 
 # IDE
 .vscode/
@@ -49,11 +46,6 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Railway specific
-.railway/
-railway.json
-Procfile
-
 # Documentation
 *.md
 !README.md
@@ -61,3 +53,27 @@ Procfile
 # Test files
 test_*.py
 *_test.py
+
+# Setup scripts
+setup_*.sh
+setup_*.bat
+start_*.sh
+start_*.bat
+
+# Docker files (keep only main one)
+Dockerfile.rag
+docker-compose.rag.yml
+
+# Logs
+*.log
+logs/
+
+# Data (will be mounted)
+data/
+*.json
+!ingredients_database.json
+
+# Environment files
+.env
+.env.local
+.env.production

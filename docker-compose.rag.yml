@@ -4,7 +4,7 @@ services:
   rag-optimization-backend:
     build:
       context: .
-      dockerfile: Dockerfile.rag
+      dockerfile: Dockerfile
     container_name: rag-meal-optimizer
     ports:
       - "5000:5000"
@@ -12,6 +12,7 @@ services:
       - FLASK_APP=backend_server.py
       - FLASK_ENV=production
       - PYTHONPATH=/app
+      - PORT=5000
     volumes:
       - ./data:/app/data
       - ./ingredients_database.json:/app/ingredients_database.json

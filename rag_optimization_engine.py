@@ -28,11 +28,8 @@ try:
 except ImportError:
     OPTUNA_AVAILABLE = False
 
-try:
-    import pygmo as pg
-    PYGMO_AVAILABLE = True
-except ImportError:
-    PYGMO_AVAILABLE = False
+# PyGMO removed - not compatible with Python 3.11
+PYGMO_AVAILABLE = False
 
 try:
     from platypus import NSGAII, Problem, Real
@@ -80,11 +77,8 @@ class RAGMealOptimizer:
         else:
             print(f"❌ Optuna not available")
             
-        if PYGMO_AVAILABLE:
-            self.optimization_methods['pygmo_optimization'] = self._optimize_pygmo
-            print(f"✅ PyGMO optimization available")
-        else:
-            print(f"❌ PyGMO not available")
+        # PyGMO removed - not compatible with Python 3.11
+        print(f"❌ PyGMO not available")
             
         if PLATYPUS_AVAILABLE:
             self.optimization_methods['nsga2_optimization'] = self._optimize_nsga2
@@ -1962,8 +1956,7 @@ class RAGMealOptimizer:
         # Add advanced methods if available
         if OPTUNA_AVAILABLE:
             optimization_order.append('optuna_optimization')
-        if PYGMO_AVAILABLE:
-            optimization_order.append('pygmo_optimization')
+        # PyGMO removed - not compatible with Python 3.11
         if PLATYPUS_AVAILABLE:
             optimization_order.append('nsga2_optimization')
         if PYMOO_AVAILABLE:
@@ -2528,10 +2521,7 @@ class RAGMealOptimizer:
                 if result['success']:
                     return result
             
-            if PYGMO_AVAILABLE:
-                result = self._optimize_pygmo(ingredients, target_macros)
-                if result['success']:
-                    return result
+                    # PyGMO removed - not compatible with Python 3.11
             
             if PLATYPUS_AVAILABLE:
                 result = self._optimize_nsga2(ingredients, target_macros)
@@ -2624,77 +2614,7 @@ class RAGMealOptimizer:
             logger.error(f"Optuna optimization failed: {e}")
             return {'success': False, 'method': 'Optuna Optimization', 'quantities': []}
     
-    def _optimize_pygmo(
-        self, 
-        ingredients: List[Dict], 
-        target_macros: Dict
-    ) -> Dict:
-        """PyGMO optimization using Differential Evolution"""
-        if not PYGMO_AVAILABLE:
-            return {'success': False, 'method': 'PyGMO not available'}
-            
-        try:
-            # Define the problem
-            class OptimizationProblem:
-                def __init__(self, ingredients, target_macros):
-                    self.ingredients = ingredients
-                    self.target_macros = target_macros
-                    self.dimension = len(ingredients)
-                
-                def fitness(self, x):
-                    # Calculate total macros
-                    total_calories = sum(x[i] * self.ingredients[i]['calories_per_100g'] / 100 
-                                       for i in range(len(self.ingredients)))
-                    total_protein = sum(x[i] * self.ingredients[i]['protein_per_100g'] / 100 
-                                      for i in range(len(self.ingredients)))
-                    total_carbs = sum(x[i] * self.ingredients[i]['carbs_per_100g'] / 100 
-                                    for i in range(len(self.ingredients)))
-                    total_fat = sum(x[i] * self.ingredients[i]['fat_per_100g'] / 100 
-                                  for i in range(len(self.ingredients)))
-                    
-                    # Get carbs target (handle both field names)
-                    carbs_target = self.target_macros.get('carbs', self.target_macros.get('carbohydrates', 0))
-                    
-                    # Calculate deviation from targets
-                    deviation = (
-                        abs(total_calories - self.target_macros['calories']) / self.target_macros['calories'] +
-                        abs(total_protein - self.target_macros['protein']) / max(self.target_macros['protein'], 1) +
-                        abs(total_carbs - carbs_target) / max(carbs_target, 1) +
-                        abs(total_fat - self.target_macros['fat']) / max(self.target_macros['fat'], 1)
-                    )
-                    
-                    return [deviation]
-                
-                def get_bounds(self):
-                    return ([10] * self.dimension, [500] * self.dimension)
-            
-            # Create the problem
-            problem = OptimizationProblem(ingredients, target_macros)
-            
-            # Create the algorithm
-            algorithm = pg.algorithm(pg.de(gen=50))  # Reduced generations for speed
-            
-            # Create the population
-            population = pg.population(problem, 20)  # Smaller population for speed
-            
-            # Evolve the population
-            population = algorithm.evolve(population)
-            
-            # Get the best individual
-            final_quantities = population.champion_x
-            
-            # Ensure quantities are within bounds
-            final_quantities = [max(10, min(500, x)) for x in final_quantities]
-            
-            return {
-                'success': True,
-                'method': 'PyGMO Differential Evolution',
-                'quantities': final_quantities
-            }
-            
-        except Exception as e:
-            logger.error(f"PyGMO optimization failed: {e}")
-            return {'success': False, 'method': 'PyGMO', 'quantities': []}
+    # PyGMO optimization method removed - not compatible with Python 3.11
     
     def _optimize_nsga2(
         self, 

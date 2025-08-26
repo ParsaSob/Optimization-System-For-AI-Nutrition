@@ -12,7 +12,8 @@ flask==3.0.0
 flask-cors==4.0.0
 gunicorn==21.2.0
 optuna==3.4.0
-pygmo==2.19.5
-platypus==1.0.4
-pymoo==0.6.0
+# Advanced Optimization Libraries (Python 3.11 compatible versions)
+# Note: pygmo is not compatible with Python 3.11, using alternatives
+platypus==1.0
+pymoo==0.6.1.5
 

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Any
 import uvicorn
 from optimization_engine import MealOptimizationEngine
@@ -184,6 +184,24 @@ class RAGRequest(BaseModel):
     user_preferences: UserPreferences
     user_id: str = "default_user"
 
+class AdvancedRAGRequest(BaseModel):
+    """Advanced RAG optimization request with enhanced structure"""
+    rag_response: Dict[str, Any] = Field(..., description="RAG response from main site")
+    target_macros: Dict[str, float] = Field(..., description="Target macros: calories, protein, carbs, fat")
+    user_preferences: Dict[str, Any] = Field(..., description="User preferences and restrictions")
+    user_id: str = Field("default_user", description="Unique user identifier")
+    meal_type: str = Field("lunch", description="Type of meal to optimize")
+
+class AdvancedRAGResponse(BaseModel):
+    """Advanced RAG optimization response"""
+    user_id: str
+    optimization_result: Dict[str, Any]
+    meal: List[Dict[str, Any]]
+    nutritional_totals: Dict[str, float]
+    target_achievement: Dict[str, Any]
+    success: bool = True
+    error_message: Optional[str] = None
+
 @app.post("/optimize-rag-meal")
 async def optimize_rag_meal(request: RAGRequest):
     """
@@ -236,6 +254,120 @@ async def optimize_rag_meal(request: RAGRequest):
         logger.error(f"RAG optimization failed: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"RAG optimization failed: {str(e)}")
+
+@app.post("/optimize-advanced-rag-meal", response_model=AdvancedRAGResponse)
+async def optimize_advanced_rag_meal(request: AdvancedRAGRequest):
+    """
+    بهینه‌سازی پیشرفته برنامه غذایی با استفاده از الگوریتم‌های بهینه‌سازی پیشرفته
+    
+    این endpoint از سیستم جدید RAG optimization engine استفاده می‌کند که شامل:
+    1. انتخاب هوشمند ingredient ها
+    2. 5 الگوریتم بهینه‌سازی پیشرفته (Linear, DE, GA, Optuna, Hybrid)
+    3. محدودیت‌های واقع‌گرایانه برای مقدار ingredient ها
+    4. سیستم fallback برای اطمینان از موفقیت
+    
+    ورودی:
+    - rag_response: پاسخ RAG از سایت اصلی
+    - target_macros: ماکروهای هدف (calories, protein, carbs, fat)
+    - user_preferences: ترجیحات کاربر
+    - meal_type: نوع وعده غذایی
+    
+    خروجی:
+    - برنامه غذایی بهینه شده
+    - نتایج بهینه‌سازی
+    - دستیابی به اهداف
+    """
+    try:
+        logger.info(f"🚀 Advanced RAG optimization request for user: {request.user_id}")
+        logger.info(f"📊 Target macros: {request.target_macros}")
+        logger.info(f"🍽️ Meal type: {request.meal_type}")
+        
+        # Import the advanced RAG optimization engine
+        try:
+            from rag_optimization_engine import RAGMealOptimizer
+            logger.info("✅ Successfully imported advanced RAG optimization engine")
+        except ImportError as e:
+            logger.error(f"❌ Failed to import advanced RAG optimization engine: {e}")
+            raise HTTPException(
+                status_code=500, 
+                detail="Advanced optimization engine not available"
+            )
+        
+        # Initialize the advanced optimizer
+        try:
+            advanced_optimizer = RAGMealOptimizer()
+            logger.info("✅ Advanced RAG optimizer initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize advanced RAG optimizer: {e}")
+            raise HTTPException(
+                status_code=500, 
+                detail="Failed to initialize advanced optimization engine"
+            )
+        
+        # Run advanced optimization
+        try:
+            logger.info("🔍 Starting advanced meal optimization...")
+            result = advanced_optimizer.optimize_single_meal(
+                rag_response=request.rag_response,
+                target_macros=request.target_macros,
+                user_preferences=request.user_preferences,
+                meal_type=request.meal_type
+            )
+            logger.info("✅ Advanced meal optimization completed successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Advanced optimization failed: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Advanced optimization failed: {str(e)}"
+            )
+        
+        # Check if optimization was successful
+        if not result.get('optimization_result', {}).get('success', False):
+            logger.warning("⚠️ Optimization returned unsuccessful result")
+            return AdvancedRAGResponse(
+                user_id=request.user_id,
+                optimization_result=result.get('optimization_result', {}),
+                meal=result.get('meal', []),
+                nutritional_totals=result.get('nutritional_totals', {}),
+                target_achievement=result.get('target_achievement', {}),
+                success=False,
+                error_message="Optimization did not complete successfully"
+            )
+        
+        # Prepare response
+        response = AdvancedRAGResponse(
+            user_id=request.user_id,
+            optimization_result=result.get('optimization_result', {}),
+            meal=result.get('meal', []),
+            nutritional_totals=result.get('nutritional_totals', {}),
+            target_achievement=result.get('target_achievement', {}),
+            success=True
+        )
+        
+        logger.info(f"🎉 Advanced RAG optimization completed successfully for user: {request.user_id}")
+        logger.info(f"📊 Generated meal with {len(response.meal)} ingredients")
+        logger.info(f"🏆 Best algorithm: {response.optimization_result.get('method', 'Unknown')}")
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Fatal error in advanced RAG optimization: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Advanced RAG optimization failed: {str(e)}"
+        )
+
+@app.post("/test-advanced-rag")
+async def test_advanced_rag():
+    """Simple test endpoint for advanced RAG"""
+    return {"message": "Advanced RAG endpoint working", "status": "success"}
 
 @app.post("/add-ingredients")
 async def add_ingredients(ingredients: List[Ingredient]):

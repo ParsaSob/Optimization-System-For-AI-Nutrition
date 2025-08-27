@@ -179,45 +179,92 @@ class RAGMealOptimizer:
     
     def _select_ingredients_by_macro(self, macro: str, deficit: float, existing_names: set) -> List[Dict]:
         """Select ingredients for a specific macro deficiency"""
-        candidates = []
-        
-        for ingredient in self.ingredients_db:
-            if ingredient['name'].lower() not in existing_names:
-                macro_content = ingredient.get(f'{macro}_per_100g', 0)
-                if macro_content > 0:
-                    # Calculate efficiency (macro per calorie)
-                    calories = ingredient.get('calories_per_100g', 1)
-                    efficiency = macro_content / max(calories, 1)
-                    
-                    # Calculate quantity needed
-                    quantity_needed = min((deficit / macro_content) * 100, ingredient.get('max_quantity', 200))
-                    
-                    candidates.append({
-                        'ingredient': ingredient.copy(),
-                        'efficiency': efficiency,
-                        'quantity_needed': quantity_needed,
-                        'score': efficiency * (1 - (quantity_needed / ingredient.get('max_quantity', 200)))
-                    })
-        
-        # Sort by score and select top candidates
-        candidates.sort(key=lambda x: x['score'], reverse=True)
-        
-        selected = []
-        remaining_deficit = deficit
-        
-        for candidate in candidates[:3]:  # Select up to 3 ingredients
-            if remaining_deficit <= 0:
-                break
-                
-            ingredient = candidate['ingredient'].copy()
-            ingredient['quantity_needed'] = candidate['quantity_needed']
-            selected.append(ingredient)
+        try:
+            logger.info(f"🔍 Selecting ingredients for macro: {macro}, deficit: {deficit:.1f}g")
             
-            # Update remaining deficit
-            macro_content = ingredient.get(f'{macro}_per_100g', 0)
-            remaining_deficit -= (candidate['quantity_needed'] / 100) * macro_content
-        
-        return selected
+            # Validate macro name
+            valid_macros = ['protein', 'carbs', 'fat', 'calories']
+            if macro not in valid_macros:
+                logger.error(f"❌ Invalid macro name: {macro}. Valid macros: {valid_macros}")
+                return []
+            
+            candidates = []
+            
+            for ingredient in self.ingredients_db:
+                try:
+                    if ingredient['name'].lower() not in existing_names:
+                        # Safely get macro content with proper error handling
+                        macro_field = f'{macro}_per_100g'
+                        macro_content = ingredient.get(macro_field, 0)
+                        
+                        # Ensure macro_content is a number
+                        if not isinstance(macro_content, (int, float)):
+                            logger.warning(f"⚠️ Invalid macro content for {ingredient['name']}: {macro_content} (type: {type(macro_content)})")
+                            macro_content = 0
+                        
+                        if macro_content > 0:
+                            # Calculate efficiency (macro per calorie)
+                            calories = ingredient.get('calories_per_100g', 1)
+                            if not isinstance(calories, (int, float)) or calories <= 0:
+                                calories = 1
+                            
+                            efficiency = macro_content / max(calories, 1)
+                            
+                            # Calculate quantity needed
+                            max_qty = ingredient.get('max_quantity', 200)
+                            if not isinstance(max_qty, (int, float)) or max_qty <= 0:
+                                max_qty = 200
+                            
+                            quantity_needed = min((deficit / macro_content) * 100, max_qty)
+                            
+                            # Calculate score
+                            score = efficiency * (1 - (quantity_needed / max_qty))
+                            
+                            candidates.append({
+                                'ingredient': ingredient.copy(),
+                                'efficiency': efficiency,
+                                'quantity_needed': quantity_needed,
+                                'score': score
+                            })
+                            
+                except Exception as e:
+                    logger.warning(f"⚠️ Error processing ingredient {ingredient.get('name', 'unknown')}: {e}")
+                    continue
+            
+            logger.info(f"📊 Found {len(candidates)} candidate ingredients for {macro}")
+            
+            # Sort by score and select top candidates
+            candidates.sort(key=lambda x: x['score'], reverse=True)
+            
+            selected = []
+            remaining_deficit = deficit
+            
+            for candidate in candidates[:3]:  # Select up to 3 ingredients
+                if remaining_deficit <= 0:
+                    break
+                    
+                try:
+                    ingredient = candidate['ingredient'].copy()
+                    ingredient['quantity_needed'] = candidate['quantity_needed']
+                    selected.append(ingredient)
+                    
+                    # Update remaining deficit
+                    macro_content = ingredient.get(f'{macro}_per_100g', 0)
+                    if isinstance(macro_content, (int, float)) and macro_content > 0:
+                        remaining_deficit -= (candidate['quantity_needed'] / 100) * macro_content
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Error processing candidate {candidate.get('ingredient', {}).get('name', 'unknown')}: {e}")
+                    continue
+            
+            logger.info(f"✅ Selected {len(selected)} ingredients for {macro}")
+            return selected
+            
+        except Exception as e:
+            logger.error(f"❌ Error in _select_ingredients_by_macro for {macro}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return []
     
     def _select_additional_ingredients(self, deficits: Dict, existing_names: set, already_selected: List[Dict]) -> List[Dict]:
         """Select additional ingredients to fill remaining deficits"""
@@ -256,51 +303,154 @@ class RAGMealOptimizer:
         
         return additional
     
+    def _fallback_ingredient_selection(self, deficits: Dict, rag_ingredients: List[Dict]) -> List[Dict]:
+        """Fallback ingredient selection when intelligent selection fails"""
+        logger.info("🔄 Using fallback ingredient selection")
+        
+        supplementary_ingredients = []
+        existing_names = {ing.get('name', '').lower() for ing in rag_ingredients}
+        
+        try:
+            # Simple protein supplement if needed
+            if deficits['protein'] > 10:
+                protein_ingredient = self._find_best_supplement('protein', deficits['protein'])
+                if protein_ingredient and protein_ingredient['name'].lower() not in existing_names:
+                    supplementary_ingredients.append(protein_ingredient)
+                    existing_names.add(protein_ingredient['name'].lower())
+                    logger.info(f"🥩 Fallback protein: {protein_ingredient['name']}")
+            
+            # Simple carb supplement if needed
+            if deficits['carbs'] > 10:
+                carb_ingredient = self._find_best_supplement('carbs', deficits['carbs'])
+                if carb_ingredient and carb_ingredient['name'].lower() not in existing_names:
+                    supplementary_ingredients.append(carb_ingredient)
+                    existing_names.add(carb_ingredient['name'].lower())
+                    logger.info(f"🍞 Fallback carbs: {carb_ingredient['name']}")
+            
+            # Simple fat supplement if needed
+            if deficits['fat'] > 5:
+                fat_ingredient = self._find_best_supplement('fat', deficits['fat'])
+                if fat_ingredient and fat_ingredient['name'].lower() not in existing_names:
+                    supplementary_ingredients.append(fat_ingredient)
+                    existing_names.add(fat_ingredient['name'].lower())
+                    logger.info(f"🥑 Fallback fat: {fat_ingredient['name']}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error in fallback ingredient selection: {e}")
+        
+        logger.info(f"🔄 Fallback selection complete: {len(supplementary_ingredients)} ingredients")
+        return supplementary_ingredients
+    
     def optimize_single_meal(self, rag_response: Dict, target_macros: Dict, user_preferences: Dict, meal_type: str) -> Dict:
         """Simple meal optimization: add minimal supplements to reach targets"""
         start_time = time.time()
         
-        # Extract RAG ingredients
-        rag_ingredients = self._extract_rag_ingredients(rag_response)
-        logger.info(f"🍽️ RAG ingredients: {len(rag_ingredients)} items")
-        
-        # Calculate current totals
-        current_totals = self._calculate_current_totals(rag_ingredients)
-        deficits = self._calculate_macro_deficits(current_totals, target_macros)
-        
-        logger.info(f"📊 Deficits: protein={deficits['protein']:.1f}g, carbs={deficits['carbs']:.1f}g, fat={deficits['fat']:.1f}g")
-        
-        # Add minimal supplements to fill deficits
-        supplementary_ingredients = []
-        
-        # Use intelligent ingredient selection instead of simple supplementation
-        supplementary_ingredients = self._select_optimal_ingredients(target_macros, rag_ingredients)
-        
-        # Combine all ingredients
-        all_ingredients = rag_ingredients + supplementary_ingredients
-        logger.info(f"📊 Total: {len(rag_ingredients)} RAG + {len(supplementary_ingredients)} supplements = {len(all_ingredients)} total")
-        
-        # Run advanced optimization algorithms and pick the best result
-        optimization_result = self._run_advanced_optimizations(all_ingredients, target_macros)
-        
-        # Calculate final meal
-        final_meal = self._calculate_final_meal(all_ingredients, optimization_result['quantities'])
-        
-        # Check achievement
-        target_achievement = self._check_target_achievement(final_meal, target_macros)
-        
-        computation_time = time.time() - start_time
-        
-        return {
-            "optimization_result": {
-                "success": True,
-                "method": optimization_result['method'],
-                "computation_time": round(computation_time, 3)
-            },
-            "meal": all_ingredients,
-            "nutritional_totals": final_meal,
-            "target_achievement": target_achievement
-        }
+        try:
+            logger.info(f"🚀 Starting meal optimization for {meal_type}")
+            logger.info(f"📊 Target macros: {target_macros}")
+            
+            # Validate input data
+            if not rag_response or not target_macros:
+                raise ValueError("Missing required input data: rag_response or target_macros")
+            
+            # Validate target macros structure
+            required_macros = ['calories', 'protein', 'carbs', 'fat']
+            for macro in required_macros:
+                if macro not in target_macros:
+                    raise ValueError(f"Missing required macro: {macro}")
+                if not isinstance(target_macros[macro], (int, float)) or target_macros[macro] < 0:
+                    raise ValueError(f"Invalid {macro} value: {target_macros[macro]}")
+            
+            # Extract RAG ingredients
+            rag_ingredients = self._extract_rag_ingredients(rag_response)
+            logger.info(f"🍽️ RAG ingredients: {len(rag_ingredients)} items")
+            
+            # Calculate current totals
+            current_totals = self._calculate_current_totals(rag_ingredients)
+            deficits = self._calculate_macro_deficits(current_totals, target_macros)
+            
+            logger.info(f"📊 Deficits: protein={deficits['protein']:.1f}g, carbs={deficits['carbs']:.1f}g, fat={deficits['fat']:.1f}g")
+            
+            # Add minimal supplements to fill deficits
+            supplementary_ingredients = []
+            
+            try:
+                # Use intelligent ingredient selection instead of simple supplementation
+                supplementary_ingredients = self._select_optimal_ingredients(target_macros, rag_ingredients)
+                logger.info(f"✅ Successfully selected {len(supplementary_ingredients)} supplementary ingredients")
+            except Exception as e:
+                logger.error(f"❌ Error in ingredient selection: {e}")
+                # Fallback to simple supplementation
+                supplementary_ingredients = self._fallback_ingredient_selection(deficits, rag_ingredients)
+                logger.info(f"🔄 Using fallback ingredient selection: {len(supplementary_ingredients)} ingredients")
+            
+            # Combine all ingredients
+            all_ingredients = rag_ingredients + supplementary_ingredients
+            logger.info(f"📊 Total: {len(rag_ingredients)} RAG + {len(supplementary_ingredients)} supplements = {len(all_ingredients)} total")
+            
+            # Run advanced optimization algorithms and pick the best result
+            try:
+                optimization_result = self._run_advanced_optimizations(all_ingredients, target_macros)
+                logger.info(f"✅ Optimization completed: {optimization_result['method']}")
+            except Exception as e:
+                logger.error(f"❌ Error in advanced optimization: {e}")
+                # Fallback to simple optimization
+                optimization_result = self._fallback_optimize(all_ingredients, target_macros)
+                logger.info(f"🔄 Using fallback optimization: {optimization_result['method']}")
+            
+            # Calculate final meal
+            try:
+                final_meal = self._calculate_final_meal(all_ingredients, optimization_result['quantities'])
+                logger.info(f"✅ Final meal calculated successfully")
+            except Exception as e:
+                logger.error(f"❌ Error calculating final meal: {e}")
+                # Use current totals as fallback
+                final_meal = current_totals
+                logger.info(f"🔄 Using current totals as fallback")
+            
+            # Check achievement
+            try:
+                target_achievement = self._check_target_achievement(final_meal, target_macros)
+                logger.info(f"✅ Target achievement calculated")
+            except Exception as e:
+                logger.error(f"❌ Error calculating target achievement: {e}")
+                # Create basic achievement info
+                target_achievement = {
+                    'calories': False, 'protein': False, 'carbs': False, 'fat': False, 'overall': False
+                }
+                logger.info(f"🔄 Using basic achievement info")
+            
+            computation_time = time.time() - start_time
+            
+            return {
+                "optimization_result": {
+                    "success": True,
+                    "method": optimization_result['method'],
+                    "computation_time": round(computation_time, 3)
+                },
+                "meal": all_ingredients,
+                "nutritional_totals": final_meal,
+                "target_achievement": target_achievement
+            }
+            
+        except Exception as e:
+            computation_time = time.time() - start_time
+            logger.error(f"❌ Fatal error in meal optimization: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Return error response
+            return {
+                "optimization_result": {
+                    "success": False,
+                    "method": "Error",
+                    "computation_time": round(computation_time, 3),
+                    "error": str(e)
+                },
+                "meal": [],
+                "nutritional_totals": {"calories": 0, "protein": 0, "carbs": 0, "fat": 0},
+                "target_achievement": {"overall": False}
+            }
     
     def _extract_rag_ingredients(self, rag_response: Dict) -> List[Dict]:
         """Extract ingredients from RAG response with deduplication"""

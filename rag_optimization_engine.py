@@ -522,7 +522,7 @@ class RAGMealOptimizer:
             }
     
     def _extract_rag_ingredients(self, rag_response: Dict) -> List[Dict]:
-        """Extract ingredients from RAG response with deduplication"""
+        """Extract ingredients from RAG response with deduplication and nutritional enrichment"""
         ingredients = []
         seen_ingredients = set()
         
@@ -531,12 +531,307 @@ class RAGMealOptimizer:
                 ingredient_name = ingredient.get('name', '').strip()
                 
                 if ingredient_name.lower() not in seen_ingredients:
-                    ingredients.append(ingredient)
+                    # Enrich ingredient with nutritional data from database
+                    enriched_ingredient = self._enrich_ingredient_with_nutrition(ingredient)
+                    ingredients.append(enriched_ingredient)
                     seen_ingredients.add(ingredient_name.lower())
                 else:
                     logger.info(f"⚠️ Skipping duplicate: {ingredient_name}")
         
         return ingredients
+    
+    def _enrich_ingredient_with_nutrition(self, ingredient: Dict) -> Dict:
+        """Enrich ingredient with nutritional data from database"""
+        ingredient_name = ingredient.get('name', '').strip().lower()
+        
+        # Enhanced ingredient name mappings for Persian meals
+        ingredient_mappings = {
+            # Persian meal specific mappings
+            'ground_beef': 'beef',
+            'beef_ground': 'beef',
+            'kabab_koobideh': 'beef',
+            'koobideh': 'beef',
+            'kabab': 'beef',
+            'grilled_beef': 'beef',
+            'beef_kabab': 'beef',
+            
+            # Chicken variations
+            'chicken_breast': 'chicken_breast',
+            'chicken_breasts': 'chicken_breast',
+            'chicken_kabab': 'chicken_breast',
+            'grilled_chicken': 'chicken_breast',
+            'joojeh_kabab': 'chicken_breast',
+            
+            # Fish variations
+            'salmon_fillet': 'salmon',
+            'salmon_fillets': 'salmon',
+            'grilled_salmon': 'salmon',
+            'tuna_fish': 'tuna',
+            'tuna_fillet': 'tuna',
+            'grilled_tuna': 'tuna',
+            
+            # Rice variations
+            'white_rice': 'white_rice',
+            'brown_rice': 'brown_rice',
+            'persian_rice': 'white_rice',
+            'steamed_rice': 'white_rice',
+            'rice': 'white_rice',
+            
+            # Bread variations
+            'whole_wheat_bread': 'whole_wheat_bread',
+            'whole_wheat_pasta': 'whole_wheat_pasta',
+            'pita_bread': 'whole_wheat_bread',
+            'lavash': 'whole_wheat_bread',
+            'barbari': 'whole_wheat_bread',
+            'sangak': 'whole_wheat_bread',
+            'bread': 'whole_wheat_bread',
+            
+            # Vegetable variations
+            'tomato': 'tomatoes',
+            'tomatoes': 'tomatoes',
+            'grilled_tomato': 'tomatoes',
+            'fresh_tomato': 'tomatoes',
+            'cherry_tomato': 'tomatoes',
+            
+            'onion': 'onion',
+            'onions': 'onion',
+            'red_onion': 'onion',
+            'white_onion': 'onion',
+            'grilled_onion': 'onion',
+            
+            'pepper': 'bell_peppers',
+            'bell_pepper': 'bell_peppers',
+            'bell_peppers': 'bell_peppers',
+            'grilled_pepper': 'bell_peppers',
+            'green_pepper': 'bell_peppers',
+            'red_pepper': 'bell_peppers',
+            'yellow_pepper': 'bell_peppers',
+            
+            'cucumber': 'cucumber',
+            'cucumbers': 'cucumber',
+            'fresh_cucumber': 'cucumber',
+            
+            'lettuce': 'romaine_lettuce',
+            'romaine': 'romaine_lettuce',
+            'salad_lettuce': 'romaine_lettuce',
+            
+            'carrot': 'carrots',
+            'carrots': 'carrots',
+            'fresh_carrot': 'carrots',
+            
+            'potato': 'potato',
+            'potatoes': 'potato',
+            'baked_potato': 'potato',
+            'boiled_potato': 'potato',
+            
+            'sweet_potato': 'sweet_potato',
+            'sweet_potatoes': 'sweet_potato',
+            
+            # Legume variations
+            'lentils': 'lentils',
+            'lentil': 'lentils',
+            'red_lentils': 'lentils',
+            'green_lentils': 'lentils',
+            
+            'chickpeas': 'chickpeas',
+            'chickpea': 'chickpeas',
+            'garbanzo': 'chickpeas',
+            
+            'black_beans': 'black_beans',
+            'black_bean': 'black_beans',
+            
+            'kidney_beans': 'kidney_beans',
+            'kidney_bean': 'kidney_beans',
+            
+            # Nut variations
+            'almonds': 'almonds',
+            'almond': 'almonds',
+            'raw_almonds': 'almonds',
+            
+            'walnuts': 'walnuts',
+            'walnut': 'walnuts',
+            'raw_walnuts': 'walnuts',
+            
+            'cashews': 'cashews',
+            'cashew': 'cashews',
+            'raw_cashews': 'cashews',
+            
+            'peanuts': 'peanuts',
+            'peanut': 'peanuts',
+            'raw_peanuts': 'peanuts',
+            
+            'pecans': 'pecans',
+            'pecan': 'pecans',
+            'raw_pecans': 'pecans',
+            
+            'macadamia_nuts': 'macadamia_nuts',
+            'macadamia': 'macadamia_nuts',
+            'raw_macadamia': 'macadamia_nuts',
+            
+            'pistachios': 'pistachios',
+            'pistachio': 'pistachios',
+            'raw_pistachios': 'pistachios',
+            
+            # Oil variations
+            'olive_oil': 'olive_oil',
+            'extra_virgin_olive_oil': 'olive_oil',
+            'evoo': 'olive_oil',
+            
+            'coconut_oil': 'coconut_oil',
+            'virgin_coconut_oil': 'coconut_oil',
+            
+            # Dairy variations
+            'greek_yogurt': 'greek_yogurt',
+            'yogurt': 'greek_yogurt',
+            'plain_yogurt': 'greek_yogurt',
+            
+            'cottage_cheese': 'cottage_cheese',
+            'cottage': 'cottage_cheese',
+            
+            # Protein powder variations
+            'protein_powder': 'protein_powder',
+            'whey_protein': 'whey_protein',
+            'casein_protein': 'casein_protein',
+            'protein_supplement': 'protein_powder',
+            
+            # Grain variations
+            'oats': 'oats',
+            'oatmeal': 'oats',
+            'rolled_oats': 'oats',
+            'steel_cut_oats': 'oats',
+            
+            'quinoa': 'quinoa',
+            'quinoa_grain': 'quinoa',
+            
+            # Fruit variations
+            'banana': 'banana',
+            'bananas': 'banana',
+            'fresh_banana': 'banana',
+            
+            'apple': 'apple',
+            'apples': 'apple',
+            'fresh_apple': 'apple',
+            
+            'orange': 'orange',
+            'oranges': 'orange',
+            'fresh_orange': 'orange',
+        }
+        
+        # Check mappings first
+        mapped_name = ingredient_mappings.get(ingredient_name, ingredient_name)
+        
+        # Look for exact match first
+        for db_ingredient in self.ingredients_db:
+            if db_ingredient['name'].lower() == mapped_name:
+                enriched = ingredient.copy()
+                enriched.update({
+                    'protein_per_100g': db_ingredient.get('protein_per_100g', 0),
+                    'carbs_per_100g': db_ingredient.get('carbs_per_100g', 0),
+                    'fat_per_100g': db_ingredient.get('fat_per_100g', 0),
+                    'calories_per_100g': db_ingredient.get('calories_per_100g', 0),
+                    'max_quantity': db_ingredient.get('max_quantity', 200)
+                })
+                logger.info(f"✅ Enriched {ingredient_name} (mapped to {mapped_name}) with nutritional data")
+                return enriched
+        
+        # Look for partial matches with improved logic
+        for db_ingredient in self.ingredients_db:
+            db_name = db_ingredient['name'].lower()
+            
+            # Check various matching patterns
+            if (ingredient_name in db_name or 
+                db_name in ingredient_name or 
+                ingredient_name.replace('_', ' ') in db_name or 
+                db_name.replace('_', ' ') in ingredient_name or
+                ingredient_name.replace('_', '') in db_name.replace('_', '') or
+                db_name.replace('_', '') in ingredient_name.replace('_', '') or
+                any(word in db_name for word in ingredient_name.split('_')) or
+                any(word in ingredient_name for word in db_name.split('_'))):
+                
+                enriched = ingredient.copy()
+                enriched.update({
+                    'protein_per_100g': db_ingredient.get('protein_per_100g', 0),
+                    'carbs_per_100g': db_ingredient.get('carbs_per_100g', 0),
+                    'fat_per_100g': db_ingredient.get('fat_per_100g', 0),
+                    'calories_per_100g': db_ingredient.get('calories_per_100g', 0),
+                    'max_quantity': db_ingredient.get('max_quantity', 200)
+                })
+                logger.info(f"✅ Enriched {ingredient_name} with partial match to {db_name}")
+                return enriched
+        
+        # If still no match, try to find similar ingredients by category
+        ingredient_words = set(ingredient_name.replace('_', ' ').split())
+        
+        for db_ingredient in self.ingredients_db:
+            db_name = db_ingredient['name'].lower()
+            db_words = set(db_name.replace('_', ' ').split())
+            
+            # Check if there's significant word overlap
+            if len(ingredient_words.intersection(db_words)) >= 1:
+                enriched = ingredient.copy()
+                enriched.update({
+                    'protein_per_100g': db_ingredient.get('protein_per_100g', 0),
+                    'carbs_per_100g': db_ingredient.get('carbs_per_100g', 0),
+                    'fat_per_100g': db_ingredient.get('fat_per_100g', 0),
+                    'calories_per_100g': db_ingredient.get('calories_per_100g', 0),
+                    'max_quantity': db_ingredient.get('max_quantity', 200)
+                })
+                logger.info(f"✅ Enriched {ingredient_name} with word overlap to {db_name}")
+                return enriched
+        
+        # If no match found, use default values based on ingredient type and log warning
+        logger.warning(f"⚠️ No nutritional data found for {ingredient_name}, using intelligent defaults")
+        
+        # Try to guess nutritional values based on ingredient name
+        default_values = self._guess_nutritional_values(ingredient_name)
+        
+        enriched = ingredient.copy()
+        enriched.update({
+            'protein_per_100g': default_values['protein'],
+            'carbs_per_100g': default_values['carbs'],
+            'fat_per_100g': default_values['fat'],
+            'calories_per_100g': default_values['calories'],
+            'max_quantity': 200
+        })
+        
+        logger.info(f"🔄 Using guessed values for {ingredient_name}: {default_values}")
+        return enriched
+    
+    def _guess_nutritional_values(self, ingredient_name: str) -> Dict[str, float]:
+        """Guess nutritional values based on ingredient name patterns"""
+        ingredient_lower = ingredient_name.lower()
+        
+        # Protein-rich ingredients
+        if any(word in ingredient_lower for word in ['beef', 'chicken', 'fish', 'salmon', 'tuna', 'meat', 'kabab', 'koobideh', 'joojeh']):
+            return {'protein': 25, 'carbs': 0, 'fat': 15, 'calories': 250}
+        
+        # Carb-rich ingredients
+        elif any(word in ingredient_lower for word in ['rice', 'bread', 'pasta', 'pita', 'lavash', 'barbari', 'sangak', 'potato', 'oats']):
+            return {'protein': 3, 'carbs': 25, 'fat': 1, 'calories': 120}
+        
+        # Fat-rich ingredients
+        elif any(word in ingredient_lower for word in ['oil', 'nuts', 'almond', 'walnut', 'cashew', 'peanut', 'pecan', 'macadamia']):
+            return {'protein': 8, 'carbs': 15, 'fat': 50, 'calories': 550}
+        
+        # Vegetable ingredients
+        elif any(word in ingredient_lower for word in ['tomato', 'onion', 'pepper', 'cucumber', 'lettuce', 'carrot', 'broccoli', 'spinach']):
+            return {'protein': 1, 'carbs': 5, 'fat': 0, 'calories': 25}
+        
+        # Fruit ingredients
+        elif any(word in ingredient_lower for word in ['apple', 'banana', 'orange', 'grape', 'berry', 'mango', 'pineapple']):
+            return {'protein': 1, 'carbs': 15, 'fat': 0, 'calories': 60}
+        
+        # Dairy ingredients
+        elif any(word in ingredient_lower for word in ['yogurt', 'cheese', 'milk', 'cream']):
+            return {'protein': 8, 'carbs': 4, 'fat': 5, 'calories': 100}
+        
+        # Legume ingredients
+        elif any(word in ingredient_lower for word in ['lentil', 'bean', 'chickpea', 'pea']):
+            return {'protein': 8, 'carbs': 20, 'fat': 1, 'calories': 120}
+        
+        # Default fallback
+        else:
+            return {'protein': 5, 'carbs': 10, 'fat': 5, 'calories': 100}
     
     def _calculate_current_totals(self, ingredients: List[Dict]) -> Dict:
         """Calculate current nutritional totals"""
@@ -1110,7 +1405,7 @@ class RAGMealOptimizer:
         logger.info(f"🔍 Calculating final meal with {len(ingredients)} ingredients")
         
         for i, ingredient in enumerate(ingredients):
-            quantity = quantities[i] / 100  # Convert to ratio
+            quantity = quantities[i] / 100  # Convert grams to ratio (e.g., 100g = 1.0)
             calories = ingredient.get('calories_per_100g', 0) * quantity
             protein = ingredient.get('protein_per_100g', 0) * quantity
             carbs = ingredient.get('carbs_per_100g', 0) * quantity

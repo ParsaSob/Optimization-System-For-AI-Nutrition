@@ -341,7 +341,7 @@ class RAGMealOptimizer:
         logger.info(f"🔄 Fallback selection complete: {len(supplementary_ingredients)} ingredients")
         return supplementary_ingredients
     
-    def optimize_single_meal(self, rag_response: Dict, target_macros: Dict, user_preferences: Dict, meal_type: str) -> Dict:
+    def optimize_single_meal(self, rag_response: Dict, target_macros: Dict, user_preferences: Dict, meal_type: str, request_data: Dict = None) -> Dict:
         """Simple meal optimization: add minimal supplements to reach targets"""
         start_time = time.time()
         
@@ -349,17 +349,71 @@ class RAGMealOptimizer:
             logger.info(f"🚀 Starting meal optimization for {meal_type}")
             logger.info(f"📊 Target macros: {target_macros}")
             
+            # Initialize request_data if not provided
+            if request_data is None:
+                request_data = {}
+            
             # Validate input data
             if not rag_response or not target_macros:
                 raise ValueError("Missing required input data: rag_response or target_macros")
             
             # Validate target macros structure
             required_macros = ['calories', 'protein', 'carbs', 'fat']
+            
+            # Handle different possible macro key names
+            macro_mapping = {
+                'carbohydrates': 'carbs',
+                'carb': 'carbs',
+                'protein': 'protein',
+                'proteins': 'protein',
+                'fat': 'fat',
+                'fats': 'fat',
+                'calories': 'calories',
+                'calorie': 'calories'
+            }
+            
+            # Normalize target_macros keys
+            normalized_macros = {}
+            for key, value in target_macros.items():
+                normalized_key = macro_mapping.get(key.lower(), key.lower())
+                normalized_macros[normalized_key] = value
+            
+            # Check if we have all required macros
+            missing_macros = []
             for macro in required_macros:
-                if macro not in target_macros:
-                    raise ValueError(f"Missing required macro: {macro}")
-                if not isinstance(target_macros[macro], (int, float)) or target_macros[macro] < 0:
-                    raise ValueError(f"Invalid {macro} value: {target_macros[macro]}")
+                if macro not in normalized_macros:
+                    missing_macros.append(macro)
+                elif not isinstance(normalized_macros[macro], (int, float)) or normalized_macros[macro] < 0:
+                    logger.warning(f"⚠️ Invalid {macro} value: {normalized_macros[macro]}")
+                    # Use default value for invalid macros
+                    if macro in ['calories', 'protein', 'carbs', 'fat']:
+                        default_values = {'calories': 500, 'protein': 30, 'carbs': 50, 'fat': 15}
+                        normalized_macros[macro] = default_values[macro]
+                        logger.info(f"🔄 Using default value for {macro}: {default_values[macro]}")
+            
+            if missing_macros:
+                logger.warning(f"⚠️ Missing macros: {missing_macros}")
+                logger.warning(f"⚠️ Available keys: {list(target_macros.keys())}")
+                logger.warning(f"⚠️ Normalized keys: {list(normalized_macros.keys())}")
+                
+                # Try to provide default values for missing macros
+                default_macros = {
+                    'calories': 500,
+                    'protein': 30,
+                    'carbs': 50,
+                    'fat': 15
+                }
+                
+                for missing_macro in missing_macros:
+                    if missing_macro in default_macros:
+                        normalized_macros[missing_macro] = default_macros[missing_macro]
+                        logger.info(f"🔄 Using default value for {missing_macro}: {default_macros[missing_macro]}")
+                
+                # Update target_macros with normalized values
+                target_macros = normalized_macros.copy()
+            else:
+                # Update target_macros with normalized values
+                target_macros = normalized_macros.copy()
             
             # Extract RAG ingredients
             rag_ingredients = self._extract_rag_ingredients(rag_response)
@@ -422,13 +476,28 @@ class RAGMealOptimizer:
             
             computation_time = time.time() - start_time
             
+            # Format meal ingredients for Next.js
+            formatted_meal = []
+            for i, ingredient in enumerate(all_ingredients):
+                quantity = optimization_result['quantities'][i] if i < len(optimization_result['quantities']) else ingredient.get('quantity_needed', 100)
+                formatted_meal.append({
+                    "name": ingredient['name'].replace('_', ' ').title(),
+                    "quantity_needed": round(quantity, 1),
+                    "protein_per_100g": ingredient.get('protein_per_100g', 0),
+                    "carbs_per_100g": ingredient.get('carbs_per_100g', 0),
+                    "fat_per_100g": ingredient.get('fat_per_100g', 0),
+                    "calories_per_100g": ingredient.get('calories_per_100g', 0)
+                })
+            
             return {
+                "user_id": request_data.get('user_id', 'default_user'),
+                "success": True,
                 "optimization_result": {
                     "success": True,
                     "method": optimization_result['method'],
                     "computation_time": round(computation_time, 3)
                 },
-                "meal": all_ingredients,
+                "meal": formatted_meal,
                 "nutritional_totals": final_meal,
                 "target_achievement": target_achievement
             }

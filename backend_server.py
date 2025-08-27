@@ -430,7 +430,8 @@ def optimize_single_meal_rag_advanced():
             rag_response=rag_response,
             target_macros=target_macros,
             user_preferences=user_preferences,
-            meal_type=meal_type
+            meal_type=meal_type,
+            request_data=request_data
         )
         
         return jsonify(result)

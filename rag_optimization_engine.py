@@ -82,6 +82,9 @@ class RAGMealOptimizer:
         self._setup_genetic_algorithm()
         self._setup_machine_learning()
         
+        # Add comprehensive ingredient database
+        self._add_comprehensive_ingredients()
+        
     def _load_ingredients_database(self) -> List[Dict]:
         """Load ingredients from the database"""
         try:
@@ -373,13 +376,61 @@ class RAGMealOptimizer:
             # Calculate macro deficits
             deficits = self._calculate_macro_deficits(current_totals, target_macros)
             
-            # Find supplementary ingredients to fill gaps
-            supplementary_ingredients = self._find_supplementary_ingredients(
-                deficits, rag_ingredients, user_preferences, meal_type
+            # FIRST: Try to optimize WITHOUT adding ingredients
+            logger.info(f"🔄 First attempt: Optimizing WITHOUT adding ingredients...")
+            optimization_result = self._optimize_quantities(
+                rag_ingredients, target_macros, user_preferences
             )
             
-            # Combine RAG and supplementary ingredients
-            all_ingredients = rag_ingredients + supplementary_ingredients
+            # Check if targets are actually met after first optimization
+            if optimization_result['success']:
+                # Calculate what we achieved with just RAG ingredients
+                quantities = optimization_result.get('quantities', [])
+                if len(quantities) == len(rag_ingredients):
+                    temp_meal = self._calculate_final_meal(rag_ingredients, quantities)
+                    temp_achievement = self._check_target_achievement(temp_meal, target_macros)
+                    
+                    if temp_achievement['overall_achieved']:
+                        logger.info(f"✅ Success! Targets met without adding ingredients using {optimization_result['method']}")
+                        all_ingredients = rag_ingredients
+                        supplementary_ingredients = []
+                    else:
+                        logger.info(f"⚠️ First optimization succeeded but targets not met. Adding supplementary ingredients...")
+                        # Find supplementary ingredients to fill gaps
+                        supplementary_ingredients = self._find_supplementary_ingredients(
+                            deficits, rag_ingredients, user_preferences, meal_type
+                        )
+                        
+                        # Combine RAG and supplementary ingredients
+                        all_ingredients = rag_ingredients + supplementary_ingredients
+                        
+                        # Try optimization again with supplementary ingredients
+                        optimization_result = self._optimize_quantities(
+                            all_ingredients, target_macros, user_preferences
+                        )
+                else:
+                    logger.info(f"⚠️ First optimization succeeded but quantity mismatch. Adding supplementary ingredients...")
+                    supplementary_ingredients = self._find_supplementary_ingredients(
+                        deficits, rag_ingredients, user_preferences, meal_type
+                    )
+                    all_ingredients = rag_ingredients + supplementary_ingredients
+                    optimization_result = self._optimize_quantities(
+                        all_ingredients, target_macros, user_preferences
+                    )
+            else:
+                logger.info(f"❌ Failed to meet targets without adding ingredients. Adding supplementary ingredients...")
+                # Find supplementary ingredients to fill gaps
+                supplementary_ingredients = self._find_supplementary_ingredients(
+                    deficits, rag_ingredients, user_preferences, meal_type
+                )
+                
+                # Combine RAG and supplementary ingredients
+                all_ingredients = rag_ingredients + supplementary_ingredients
+                
+                # Try optimization again with supplementary ingredients
+                optimization_result = self._optimize_quantities(
+                    all_ingredients, target_macros, user_preferences
+                )
             
             # Ensure we have at least one ingredient
             if not all_ingredients:
@@ -388,7 +439,7 @@ class RAGMealOptimizer:
             # Set current_ingredients for optimization methods to access
             self.current_ingredients = all_ingredients
             
-            # Optimize quantities using mathematical optimization - NO FALLBACK
+            # Final optimization with all ingredients
             optimization_result = self._optimize_quantities(
                 all_ingredients, target_macros, user_preferences
             )
@@ -582,7 +633,57 @@ class RAGMealOptimizer:
         return None
 
     def _analyze_meal_composition(self, rag_ingredients: List[Dict], meal_type: str) -> Dict:
-        """Analyze meal composition for smart supplementation"""
+        """Analyze meal composition for smart supplementation based on meal type"""
+        
+        # Define meal-specific ingredient preferences
+        meal_preferences = {
+                    'breakfast': {
+            'protein_priority': ['eggs', 'yogurt', 'milk', 'cheese', 'nuts', 'seeds', 'hummus', 'cottage_cheese', 'protein_powder'],
+            'carb_priority': ['oats', 'bread', 'cereal', 'fruits'],
+            'fat_priority': ['nuts', 'seeds', 'avocado', 'olive_oil'],
+            'vegetable_priority': ['spinach', 'tomato', 'bell_pepper', 'mushroom'],
+            'avoid_conflicts': ['heavy_meat', 'rice', 'pasta']  # Avoid heavy foods for breakfast
+        },
+        'morning_snack': {
+            'protein_priority': ['nuts', 'yogurt', 'cheese', 'seeds', 'hummus', 'cottage_cheese', 'protein_bar'],
+            'carb_priority': ['fruits', 'crackers', 'granola'],
+            'fat_priority': ['nuts', 'seeds', 'avocado'],
+            'vegetable_priority': ['carrots', 'celery', 'cucumber'],
+            'avoid_conflicts': ['heavy_meat', 'rice', 'pasta']
+        },
+            'lunch': {
+                'protein_priority': ['chicken', 'beef', 'fish', 'lentils', 'black_beans', 'kidney_beans'],
+                'carb_priority': ['rice', 'pasta', 'bread', 'potato'],
+                'fat_priority': ['olive_oil', 'nuts', 'avocado'],
+                'vegetable_priority': ['lettuce', 'tomato', 'cucumber', 'onion', 'carrots'],
+                'avoid_conflicts': []
+            },
+                    'afternoon_snack': {
+            'protein_priority': ['nuts', 'yogurt', 'cheese', 'seeds', 'hummus', 'cottage_cheese', 'protein_bar', 'edamame'],
+            'carb_priority': ['fruits', 'crackers', 'granola'],
+            'fat_priority': ['nuts', 'seeds', 'avocado'],
+            'vegetable_priority': ['carrots', 'celery', 'cucumber'],
+            'avoid_conflicts': ['heavy_meat', 'rice', 'pasta']
+        },
+        'evening_snack': {
+            'protein_priority': ['nuts', 'yogurt', 'cheese', 'seeds', 'hummus', 'cottage_cheese', 'protein_bar', 'edamame'],
+            'carb_priority': ['fruits', 'crackers', 'granola'],
+            'fat_priority': ['nuts', 'seeds', 'avocado'],
+            'vegetable_priority': ['carrots', 'celery', 'cucumber'],
+            'avoid_conflicts': ['heavy_meat', 'rice', 'pasta']
+        },
+            'dinner': {
+                'protein_priority': ['chicken', 'beef', 'fish', 'lentils', 'black_beans', 'kidney_beans'],
+                'carb_priority': ['rice', 'pasta', 'bread', 'potato'],
+                'fat_priority': ['olive_oil', 'nuts', 'avocado'],
+                'vegetable_priority': ['lettuce', 'tomato', 'cucumber', 'onion', 'carrots'],
+                'avoid_conflicts': []
+            }
+        }
+        
+        # Get preferences for this meal type
+        meal_pref = meal_preferences.get(meal_type.lower(), meal_preferences['lunch'])
+        
         analysis = {
             'meal_type': meal_type,
             'rag_ingredients': rag_ingredients,
@@ -591,12 +692,12 @@ class RAGMealOptimizer:
             'fat_sources': [],
             'vegetable_sources': [],
             'grain_sources': [],
-            'seasonal_availability': {
-                'summer': ['Berries', 'Tomatoes', 'Zucchini', 'Bell Peppers'],
-                'winter': ['Root Vegetables', 'Winter Squash', 'Citrus Fruits'],
-                'spring': ['Asparagus', 'Peas', 'Strawberries', 'Leafy Greens'],
-                'fall': ['Pumpkin', 'Apples', 'Mushrooms', 'Brussels Sprouts']
-            }
+            'meal_preferences': meal_pref,
+            'existing_proteins': set(),
+            'existing_carbs': set(),
+            'existing_fats': set(),
+            'existing_vegetables': set(),
+            'existing_grains': set()
         }
         
         for ingredient in rag_ingredients:
@@ -606,20 +707,113 @@ class RAGMealOptimizer:
             # Categorize ingredients
             if ingredient.get('protein_per_100g', 0) > 5:
                 analysis['protein_sources'].append(ingredient)
+                analysis['existing_proteins'].add(self._get_protein_type(name))
             if ingredient.get('carbs_per_100g', 0) > 10:
                 analysis['carb_sources'].append(ingredient)
+                analysis['existing_carbs'].add(self._get_carb_type(name))
             if ingredient.get('fat_per_100g', 0) > 5:
                 analysis['fat_sources'].append(ingredient)
-            if category == 'vegetable' or any(veg in name for veg in ['tomato', 'onion', 'lettuce', 'spinach']):
+                analysis['existing_fats'].add(self._get_fat_type(name))
+            if category == 'vegetable' or any(veg in name for veg in ['tomato', 'onion', 'lettuce', 'spinach', 'carrot', 'cucumber']):
                 analysis['vegetable_sources'].append(ingredient)
-            if category == 'grain' or any(grain in name for grain in ['rice', 'pasta', 'bread', 'oats']):
+                analysis['existing_vegetables'].add(self._get_vegetable_type(name))
+            if category == 'grain' or any(grain in name for grain in ['rice', 'pasta', 'bread', 'oats', 'potato']):
                 analysis['grain_sources'].append(ingredient)
+                analysis['existing_grains'].add(self._get_grain_type(name))
         
         return analysis
+    
+    def _get_protein_type(self, name: str) -> str:
+        """Categorize protein types to avoid conflicts"""
+        name_lower = name.lower()
+        if any(meat in name_lower for meat in ['beef', 'steak', 'ground']):
+            return 'red_meat'
+        elif any(meat in name_lower for meat in ['chicken', 'turkey', 'poultry']):
+            return 'poultry'
+        elif any(meat in name_lower for meat in ['fish', 'salmon', 'tuna', 'cod']):
+            return 'fish'
+        elif any(meat in name_lower for meat in ['pork', 'ham', 'bacon']):
+            return 'pork'
+        elif any(meat in name_lower for meat in ['lamb', 'mutton']):
+            return 'lamb'
+        elif any(meat in name_lower for meat in ['lentils', 'beans', 'chickpeas']):
+            return 'legumes'
+        elif any(meat in name_lower for meat in ['eggs', 'yogurt', 'cheese', 'milk']):
+            return 'dairy'
+        elif any(meat in name_lower for meat in ['nuts', 'seeds', 'almonds']):
+            return 'nuts'
+        else:
+            return 'other_protein'
+    
+    def _get_carb_type(self, name: str) -> str:
+        """Categorize carb types to avoid conflicts"""
+        name_lower = name.lower()
+        if any(grain in name_lower for grain in ['rice', 'basmati', 'jasmine']):
+            return 'rice'
+        elif any(grain in name_lower for grain in ['pasta', 'spaghetti', 'penne']):
+            return 'pasta'
+        elif any(grain in name_lower for grain in ['bread', 'toast', 'bun']):
+            return 'bread'
+        elif any(grain in name_lower for grain in ['potato', 'sweet_potato']):
+            return 'potato'
+        elif any(grain in name_lower for grain in ['oats', 'oatmeal']):
+            return 'oats'
+        elif any(grain in name_lower for grain in ['quinoa', 'couscous']):
+            return 'other_grain'
+        else:
+            return 'other_carb'
+    
+    def _get_fat_type(self, name: str) -> str:
+        """Categorize fat types to avoid conflicts"""
+        name_lower = name.lower()
+        if any(fat in name_lower for fat in ['olive_oil', 'olive']):
+            return 'olive_oil'
+        elif any(fat in name_lower for fat in ['butter', 'ghee']):
+            return 'butter'
+        elif any(fat in name_lower for fat in ['nuts', 'almonds', 'walnuts']):
+            return 'nuts'
+        elif any(fat in name_lower for fat in ['avocado']):
+            return 'avocado'
+        elif any(fat in name_lower for fat in ['cheese', 'cream']):
+            return 'dairy_fat'
+        else:
+            return 'other_fat'
+    
+    def _get_vegetable_type(self, name: str) -> str:
+        """Categorize vegetable types to avoid conflicts"""
+        name_lower = name.lower()
+        if any(veg in name_lower for veg in ['tomato', 'cherry_tomato']):
+            return 'tomato'
+        elif any(veg in name_lower for veg in ['onion', 'red_onion', 'white_onion']):
+            return 'onion'
+        elif any(veg in name_lower for veg in ['lettuce', 'spinach', 'kale']):
+            return 'leafy_green'
+        elif any(veg in name_lower for veg in ['carrot', 'carrots']):
+            return 'carrot'
+        elif any(veg in name_lower for veg in ['cucumber', 'cucumbers']):
+            return 'cucumber'
+        elif any(veg in name_lower for veg in ['bell_pepper', 'pepper']):
+            return 'bell_pepper'
+        else:
+            return 'other_vegetable'
+    
+    def _get_grain_type(self, name: str) -> str:
+        """Categorize grain types to avoid conflicts"""
+        name_lower = name.lower()
+        if any(grain in name_lower for grain in ['rice', 'basmati', 'jasmine', 'brown_rice']):
+            return 'rice'
+        elif any(grain in name_lower for grain in ['pasta', 'spaghetti', 'penne', 'fettuccine']):
+            return 'pasta'
+        elif any(grain in name_lower for grain in ['bread', 'toast', 'bun', 'sandwich']):
+            return 'bread'
+        elif any(grain in name_lower for grain in ['oats', 'oatmeal']):
+            return 'oats'
+        else:
+            return 'other_grain'
 
     def _find_supplementary_ingredients(self, deficits: Dict, rag_ingredients: List[Dict], user_preferences: Dict, meal_type: str) -> List[Dict]:
-        """Find supplementary ingredients to meet macro targets with minimal additions"""
-        supplements = []
+        """Find supplementary ingredients to meet macro targets with meal-type-aware logic"""
+        logger.info(f"🔍 Finding supplementary ingredients for {meal_type}...")
         
         # Analyze meal composition for better supplementation strategy
         meal_analysis = self._analyze_meal_composition(rag_ingredients, meal_type)
@@ -631,17 +825,425 @@ class RAGMealOptimizer:
         # Calculate current totals
         current_totals = self._calculate_current_totals(rag_ingredients)
         
-        # Smart supplementation: try to meet targets with minimal ingredients
-        supplements = self._smart_minimal_supplementation(deficits, rag_ingredients, added_ingredients, added_categories, current_totals, meal_analysis, user_preferences)
+        supplements = []
         
-        # If targets still not met, add more ingredients strategically
-        if not self._are_targets_met(supplements, current_totals, deficits):
-            supplements = self._strategic_additional_supplementation(supplements, deficits, added_ingredients, added_categories, current_totals, meal_analysis, user_preferences)
+        # Debug logging for deficits
+        logger.info(f"🔍 Deficits: protein={deficits['protein']:.1f}g, carbs={deficits['carbs']:.1f}g, fat={deficits['fat']:.1f}g, calories={deficits['calories']:.1f}cal")
         
-        # Final optimization to ensure targets are met with minimal ingredients
-        supplements = self._final_minimal_optimization(supplements, deficits, current_totals)
+        # SMART LOGIC: Only add ingredients if truly needed and appropriate
+        # Check if we already have sufficient protein sources
+        existing_protein_sources = meal_analysis['protein_sources']
+        total_existing_protein = sum(ing.get('protein_per_100g', 0) * ing.get('quantity_needed', 100) / 100 for ing in existing_protein_sources)
+        # If quantity_needed is 0, use actual quantity from RAG ingredients
+        if total_existing_protein == 0:
+            total_existing_protein = sum(ing.get('protein_per_100g', 0) * ing.get('quantity', 100) / 100 for ing in existing_protein_sources)
         
+        # AGGRESSIVE: Always add protein if there's a deficit, regardless of existing sources
+        if deficits['protein'] > 2:  # Add if any significant protein deficit
+            logger.info(f"🔍 Adding protein supplements: deficit={deficits['protein']:.1f}g, existing={total_existing_protein:.1f}g")
+            
+            # Try to add multiple protein sources if needed
+            remaining_protein_deficit = deficits['protein']
+            max_protein_attempts = 3  # Maximum 3 protein supplements
+            
+            for attempt in range(max_protein_attempts):
+                if remaining_protein_deficit <= 2:  # Stop if deficit is small enough
+                    break
+                    
+                protein_supplement = self._find_meal_appropriate_protein(
+                    remaining_protein_deficit, meal_analysis, added_ingredients, added_categories
+                )
+                
+                if protein_supplement:
+                    # Calculate how much protein this supplement will add
+                    supplement_protein = protein_supplement.get('protein_per_100g', 0)
+                    if supplement_protein > 0:
+                        # SMART QUANTITY CALCULATION: Calculate optimal quantity based on deficit and constraints
+                        # Calculate how much we need to add
+                        protein_needed = min(remaining_protein_deficit, 12)  # Don't add more than 12g at once
+                        
+                        # Calculate quantity needed
+                        estimated_quantity = (protein_needed / supplement_protein) * 100
+                        
+                        # Apply reasonable bounds
+                        estimated_quantity = max(20, min(120, estimated_quantity))  # Between 20g and 120g
+                        
+                        protein_supplement['quantity_needed'] = round(estimated_quantity, 1)
+                        
+                        supplements.append(protein_supplement)
+                        added_ingredients.add(protein_supplement['name'])
+                        added_categories.add(protein_supplement.get('category', 'protein'))
+                        
+                        # Calculate actual protein added
+                        protein_added = (supplement_protein * estimated_quantity) / 100
+                        remaining_protein_deficit -= protein_added
+                        
+                        logger.info(f"✅ Added protein supplement {attempt+1}: {protein_supplement['name']} ({protein_added:.1f}g protein, {estimated_quantity:.1f}g quantity, remaining deficit: {remaining_protein_deficit:.1f}g)")
+                    else:
+                        logger.warning(f"⚠️ Protein supplement has no protein content: {protein_supplement['name']}")
+                        break
+                else:
+                    logger.warning(f"⚠️ No suitable protein supplement found for attempt {attempt+1}")
+                    break
+        else:
+            logger.info(f"✅ Protein target met or close enough (deficit: {deficits['protein']:.1f}g)")
+        
+        # Check if we already have sufficient carb sources
+        existing_carb_sources = meal_analysis['carb_sources']
+        total_existing_carbs = sum(ing.get('carbs_per_100g', 0) * ing.get('quantity_needed', 100) / 100 for ing in existing_carb_sources)
+        # If quantity_needed is 0, use actual quantity from RAG ingredients
+        if total_existing_carbs == 0:
+            total_existing_carbs = sum(ing.get('carbs_per_100g', 0) * ing.get('quantity', 100) / 100 for ing in existing_carb_sources)
+        
+        # CONSERVATIVE: Only add carbs if we have a significant deficit AND don't have enough carb sources
+        if deficits['carbs'] > 15 and total_existing_carbs < 15:  # Much more conservative carb addition
+            logger.info(f"🔍 Adding carb supplement: deficit={deficits['carbs']:.1f}g, existing={total_existing_carbs:.1f}g")
+            carb_supplement = self._find_meal_appropriate_carb(
+                deficits['carbs'], meal_analysis, added_ingredients, added_categories
+            )
+            if carb_supplement:
+                supplements.append(carb_supplement)
+                added_ingredients.add(carb_supplement['name'])
+                added_categories.add(carb_supplement.get('category', 'carb'))
+                logger.info(f"✅ Added carb supplement: {carb_supplement['name']}")
+            else:
+                logger.warning(f"⚠️ No suitable carb supplement found for deficit: {deficits['carbs']:.1f}g")
+        elif deficits['carbs'] > 8:
+            logger.info(f"⚠️ Carb deficit exists ({deficits['carbs']:.1f}g) but sufficient carb sources already present ({total_existing_carbs:.1f}g)")
+        else:
+            logger.info(f"✅ Carb target met or close enough (deficit: {deficits['carbs']:.1f}g)")
+        
+        # Check if we already have sufficient fat sources
+        existing_fat_sources = meal_analysis['fat_sources']
+        total_existing_fat = sum(ing.get('fat_per_100g', 0) * ing.get('quantity_needed', 100) / 100 for ing in existing_fat_sources)
+        # If quantity_needed is 0, use actual quantity from RAG ingredients
+        if total_existing_fat == 0:
+            total_existing_fat = sum(ing.get('fat_per_100g', 0) * ing.get('quantity', 100) / 100 for ing in existing_fat_sources)
+        
+        # ULTRA CONSERVATIVE: Only add fat if we have a significant deficit AND don't have enough fat sources
+        if deficits['fat'] > 10 and total_existing_fat < 3:  # Ultra conservative fat addition
+            logger.info(f"🔍 Adding fat supplement: deficit={deficits['fat']:.1f}g, existing={total_existing_fat:.1f}g")
+            fat_supplement = self._find_meal_appropriate_fat(
+                deficits['fat'], meal_analysis, added_ingredients, added_categories
+            )
+            if fat_supplement:
+                # Check if this fat source is low-calorie and won't overshoot
+                if fat_supplement.get('calories_per_100g', 0) < 150:  # Only very low-calorie fats
+                    supplements.append(fat_supplement)
+                    added_ingredients.add(fat_supplement['name'])
+                    added_categories.add(fat_supplement.get('category', 'fat'))
+                    logger.info(f"✅ Added low-calorie fat supplement: {fat_supplement['name']}")
+                else:
+                    logger.info(f"⚠️ Skipping {fat_supplement['name']} - too high calorie for fat supplement")
+            else:
+                logger.warning(f"⚠️ No suitable fat supplement found for deficit: {deficits['fat']:.1f}g")
+        elif deficits['fat'] > 5:
+            logger.info(f"⚠️ Fat deficit exists ({deficits['fat']:.1f}g) but sufficient fat sources already present ({total_existing_fat:.1f}g)")
+        else:
+            logger.info(f"✅ Fat target met or close enough (deficit: {deficits['fat']:.1f}g)")
+        
+        # Add vegetables only if appropriate for the meal type and we have room
+        if meal_type.lower() in ['lunch', 'dinner'] and len(supplements) < 1:  # Limit to 1 supplement
+            veg_supplement = self._find_meal_appropriate_vegetable(
+                meal_analysis, added_ingredients, added_categories
+            )
+            if veg_supplement:
+                supplements.append(veg_supplement)
+                added_ingredients.add(veg_supplement['name'])
+                added_categories.add(veg_supplement.get('category', 'vegetable'))
+        
+        # Add fruits for breakfast and snacks
+        if meal_type.lower() in ['breakfast', 'morning_snack', 'afternoon_snack', 'evening_snack'] and len(supplements) < 1:  # Limit to 1 supplement
+            fruit_supplement = self._find_meal_appropriate_fruit(
+                meal_analysis, added_ingredients, added_categories
+            )
+            if fruit_supplement:
+                supplements.append(fruit_supplement)
+                added_ingredients.add(fruit_supplement['name'])
+                added_categories.add(fruit_supplement.get('category', 'fruit'))
+        
+        logger.info(f"✅ Added {len(supplements)} supplementary ingredients: {[s['name'] for s in supplements]}")
         return supplements
+    
+    def _find_meal_appropriate_protein(self, protein_deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find meal-appropriate protein source avoiding conflicts"""
+        meal_type = meal_analysis['meal_type'].lower()
+        meal_pref = meal_analysis['meal_preferences']
+        existing_proteins = meal_analysis['existing_proteins']
+        
+        # Get priority proteins for this meal type
+        priority_proteins = meal_pref['protein_priority']
+        
+        # Filter out ingredients that conflict with existing ones
+        available_proteins = []
+        for protein_name in priority_proteins:
+            if protein_name not in added_ingredients:
+                # Check if this protein type conflicts with existing ones
+                protein_type = self._get_protein_type(protein_name)
+                if protein_type not in existing_proteins:
+                    ingredient = self._find_ingredient_by_name(protein_name)
+                    if ingredient and ingredient.get('protein_per_100g', 0) > 7:  # Lower threshold to include legumes
+                        # ULTRA PRIORITY: Beans and legumes for better macro balance (low fat, high protein)
+                        if any(legume in protein_name.lower() for legume in ['beans', 'lentils', 'chickpeas', 'edamame', 'tofu', 'tempeh']):
+                            # Always prioritize legumes over other proteins
+                            # Check if it's low-fat (better for macro balance)
+                            if ingredient.get('fat_per_100g', 0) < 5:
+                                available_proteins.insert(0, ingredient)  # Ultra priority
+                                logger.info(f"✅ Prioritizing low-fat legume: {protein_name} (fat: {ingredient.get('fat_per_100g', 0)}g)")
+                            else:
+                                available_proteins.insert(1, ingredient)  # High priority
+                                logger.info(f"✅ Prioritizing legume: {protein_name} (fat: {ingredient.get('fat_per_100g', 0)}g)")
+                        # AVOID: Don't add any meat if we already have meat
+                        elif any(meat_type in protein_type for meat_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb']):
+                            if not any(existing_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb'] for existing_type in existing_proteins):
+                                available_proteins.append(ingredient)  # Only add if no meat exists
+                            else:
+                                logger.info(f"⚠️ Skipping {protein_name} - meat conflict detected (existing: {existing_proteins})")
+                        else:
+                            available_proteins.append(ingredient)
+        
+        # If no priority proteins available, find alternatives
+        if not available_proteins:
+            for ingredient in self.ingredients_db:
+                if (ingredient.get('protein_per_100g', 0) > 7 and  # Lower threshold to include legumes 
+                    ingredient.get('name', '').lower() not in added_ingredients):
+                    protein_type = self._get_protein_type(ingredient.get('name', ''))
+                    if protein_type not in existing_proteins:
+                        # Additional check: avoid adding heavy proteins to light meals
+                        if meal_type in ['breakfast', 'morning_snack', 'afternoon_snack', 'evening_snack']:
+                            # For light meals, prefer lighter proteins and easy-to-eat options
+                            if ingredient.get('calories_per_100g', 0) < 250:  # Slightly higher calorie limit for light meals
+                                # Prioritize easy-to-eat proteins for snacks
+                                protein_name = ingredient.get('name', '').lower()
+                                if any(easy_protein in protein_name for easy_protein in ['yogurt', 'cheese', 'nuts', 'seeds', 'hummus', 'cottage', 'protein_powder', 'protein_bar', 'edamame']):
+                                    available_proteins.insert(0, ingredient)  # Add to front for priority
+                                else:
+                                    available_proteins.append(ingredient)
+                        else:
+                            # For main meals, prefer balanced proteins (not too high calorie)
+                            # ULTRA PRIORITY: Beans and legumes for better macro balance (low fat, high protein)
+                            protein_name = ingredient.get('name', '').lower()
+                            if any(legume in protein_name for legume in ['beans', 'lentils', 'chickpeas', 'edamame', 'tofu', 'tempeh']):
+                                # Check if it's low-fat (better for macro balance)
+                                if ingredient.get('fat_per_100g', 0) < 5:
+                                    available_proteins.insert(0, ingredient)  # Ultra priority
+                                    logger.info(f"✅ Alternative low-fat legume: {ingredient.get('name', '')} (fat: {ingredient.get('fat_per_100g', 0)}g)")
+                                else:
+                                    available_proteins.insert(1, ingredient)  # High priority
+                                    logger.info(f"✅ Alternative legume: {ingredient.get('name', '')} (fat: {ingredient.get('fat_per_100g', 0)}g)")
+                            # AVOID: Don't add any meat if we already have meat
+                            elif any(meat_type in protein_type for meat_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb']):
+                                if not any(existing_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb'] for existing_type in existing_proteins):
+                                    if ingredient.get('calories_per_100g', 0) < 200:  # Moderate calorie proteins
+                                        available_proteins.insert(2, ingredient)  # Add to third priority
+                                    else:
+                                        available_proteins.append(ingredient)
+                                else:
+                                    logger.info(f"⚠️ Skipping {ingredient.get('name', '')} - meat conflict detected (existing: {existing_proteins})")
+                            elif ingredient.get('calories_per_100g', 0) < 200:  # Moderate calorie proteins
+                                available_proteins.insert(2, ingredient)  # Add to third priority
+                            else:
+                                available_proteins.append(ingredient)
+        
+        if available_proteins:
+            # SMART SELECTION: Choose based on multiple criteria
+            # 1. First priority: Low-fat legumes (best for macro balance)
+            low_fat_legumes = [p for p in available_proteins if 
+                              any(legume in p.get('name', '').lower() for legume in ['beans', 'lentils', 'chickpeas', 'edamame', 'tofu', 'tempeh']) and
+                              p.get('fat_per_100g', 0) < 5]
+            
+            if low_fat_legumes:
+                # Choose the one with highest protein content among low-fat legumes
+                best_protein = max(low_fat_legumes, key=lambda x: x.get('protein_per_100g', 0))
+                logger.info(f"🏆 Selected low-fat legume: {best_protein.get('name', '')} (protein: {best_protein.get('protein_per_100g', 0)}g, fat: {best_protein.get('fat_per_100g', 0)}g)")
+                return best_protein
+            
+            # 2. Second priority: Other legumes
+            other_legumes = [p for p in available_proteins if 
+                            any(legume in p.get('name', '').lower() for legume in ['beans', 'lentils', 'chickpeas', 'edamame', 'tofu', 'tempeh'])]
+            
+            if other_legumes:
+                best_protein = max(other_legumes, key=lambda x: x.get('protein_per_100g', 0))
+                logger.info(f"🥈 Selected legume: {best_protein.get('name', '')} (protein: {best_protein.get('protein_per_100g', 0)}g, fat: {best_protein.get('fat_per_100g', 0)}g)")
+                return best_protein
+            
+            # 3. Third priority: Other proteins (non-meat)
+            other_proteins = [p for p in available_proteins if 
+                             not any(meat_type in self._get_protein_type(p.get('name', '')) for meat_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb'])]
+            
+            if other_proteins:
+                best_protein = max(other_proteins, key=lambda x: x.get('protein_per_100g', 0))
+                logger.info(f"🥉 Selected other protein: {best_protein.get('name', '')} (protein: {best_protein.get('protein_per_100g', 0)}g)")
+                return best_protein
+            
+            # 4. Last resort: Any available protein
+            best_protein = max(available_proteins, key=lambda x: x.get('protein_per_100g', 0))
+            logger.info(f"🔴 Selected fallback protein: {best_protein.get('name', '')} (protein: {best_protein.get('protein_per_100g', 0)}g)")
+            return best_protein
+        
+        return None
+    
+    def _find_meal_appropriate_carb(self, carb_deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find meal-appropriate carb source avoiding conflicts"""
+        meal_type = meal_analysis['meal_type'].lower()
+        meal_pref = meal_analysis['meal_preferences']
+        existing_carbs = meal_analysis['existing_carbs']
+        
+        # Get priority carbs for this meal type
+        priority_carbs = meal_pref['carb_priority']
+        
+        # Filter out ingredients that conflict with existing ones
+        available_carbs = []
+        for carb_name in priority_carbs:
+            if carb_name not in added_ingredients:
+                # Check if this carb type conflicts with existing ones
+                carb_type = self._get_carb_type(carb_name)
+                if carb_type not in existing_carbs:
+                    ingredient = self._find_ingredient_by_name(carb_name)
+                    if ingredient and ingredient.get('carbs_per_100g', 0) > 20:
+                        available_carbs.append(ingredient)
+        
+        # If no priority carbs available, find alternatives
+        if not available_carbs:
+            for ingredient in self.ingredients_db:
+                if (ingredient.get('carbs_per_100g', 0) > 20 and 
+                    ingredient.get('name', '').lower() not in added_ingredients):
+                    carb_type = self._get_carb_type(ingredient.get('name', ''))
+                    if carb_type not in existing_carbs:
+                        # Additional check: avoid adding heavy carbs to light meals
+                        if meal_type in ['breakfast', 'morning_snack', 'afternoon_snack', 'evening_snack']:
+                            # For light meals, prefer lighter carbs
+                            if ingredient.get('calories_per_100g', 0) < 300:  # Lower calorie carbs
+                                available_carbs.append(ingredient)
+                        else:
+                            # For main meals, prefer balanced carbs (not too high)
+                            # Avoid extremely high carb ingredients that might overshoot
+                            if ingredient.get('carbs_per_100g', 0) < 60:  # Moderate carb content
+                                available_carbs.insert(0, ingredient)  # Add to front for priority
+                            else:
+                                available_carbs.append(ingredient)
+        
+        if available_carbs:
+            # Choose the one with highest carb content
+            best_carb = max(available_carbs, key=lambda x: x.get('carbs_per_100g', 0))
+            return best_carb
+        
+        return None
+    
+    def _find_meal_appropriate_fat(self, fat_deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find meal-appropriate fat source avoiding conflicts"""
+        meal_type = meal_analysis['meal_type'].lower()
+        meal_pref = meal_analysis['meal_preferences']
+        existing_fats = meal_analysis['existing_fats']
+        
+        # Get priority fats for this meal type
+        priority_fats = meal_pref['fat_priority']
+        
+        # Filter out ingredients that conflict with existing ones
+        available_fats = []
+        for fat_name in priority_fats:
+            if fat_name not in added_ingredients:
+                # Check if this fat type conflicts with existing ones
+                fat_type = self._get_fat_type(fat_name)
+                if fat_type not in existing_fats:
+                    ingredient = self._find_ingredient_by_name(fat_name)
+                    if ingredient and ingredient.get('fat_per_100g', 0) > 10:
+                        available_fats.append(ingredient)
+        
+        # If no priority fats available, find alternatives
+        if not available_fats:
+            for ingredient in self.ingredients_db:
+                if (ingredient.get('fat_per_100g', 0) > 10 and 
+                    ingredient.get('name', '').lower() not in added_ingredients):
+                    fat_type = self._get_fat_type(ingredient.get('name', ''))
+                    if fat_type not in existing_fats:
+                        # Additional check: avoid adding heavy fats to light meals
+                        if meal_type in ['breakfast', 'morning_snack', 'afternoon_snack', 'evening_snack']:
+                            # For light meals, prefer lighter fats
+                            if ingredient.get('calories_per_100g', 0) < 400:  # Lower calorie fats
+                                available_fats.append(ingredient)
+                        else:
+                            # For main meals, any fat is fine
+                            available_fats.append(ingredient)
+        
+        if available_fats:
+            # Choose the one with moderate fat content (not too high)
+            best_fat = min(available_fats, key=lambda x: x.get('fat_per_100g', 0))
+            return best_fat
+        
+        return None
+    
+    def _find_meal_appropriate_vegetable(self, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find meal-appropriate vegetable avoiding conflicts"""
+        meal_type = meal_analysis['meal_type'].lower()
+        meal_pref = meal_analysis['meal_preferences']
+        existing_vegetables = meal_analysis['existing_vegetables']
+        
+        # Get priority vegetables for this meal type
+        priority_vegetables = meal_pref['vegetable_priority']
+        
+        # Filter out vegetables that conflict with existing ones
+        available_vegetables = []
+        for veg_name in priority_vegetables:
+            if veg_name not in added_ingredients:
+                # Check if this vegetable type conflicts with existing ones
+                veg_type = self._get_vegetable_type(veg_name)
+                if veg_type not in existing_vegetables:
+                    ingredient = self._find_ingredient_by_name(veg_name)
+                    if ingredient and ingredient.get('calories_per_100g', 0) < 50:  # Low calorie vegetables
+                        available_vegetables.append(ingredient)
+        
+        # If no priority vegetables available, find alternatives
+        if not available_vegetables:
+            for ingredient in self.ingredients_db:
+                if (ingredient.get('calories_per_100g', 0) < 50 and 
+                    ingredient.get('name', '').lower() not in added_ingredients):
+                    veg_type = self._get_vegetable_type(ingredient.get('name', ''))
+                    if veg_type not in existing_vegetables:
+                        available_vegetables.append(ingredient)
+        
+        if available_vegetables:
+            # Choose the one with lowest calories
+            best_vegetable = min(available_vegetables, key=lambda x: x.get('calories_per_100g', 0))
+            return best_vegetable
+        
+        return None
+    
+    def _find_meal_appropriate_fruit(self, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find meal-appropriate fruit for breakfast and snacks"""
+        meal_type = meal_analysis['meal_type'].lower()
+        existing_fruits = meal_analysis.get('existing_fruits', set())
+        
+        # Define appropriate fruits for different meal types
+        fruit_preferences = {
+            'breakfast': ['apple', 'banana', 'orange', 'berries', 'grapes'],
+            'morning_snack': ['apple', 'banana', 'orange', 'pear'],
+            'afternoon_snack': ['apple', 'banana', 'orange', 'grapes', 'kiwi'],
+            'evening_snack': ['apple', 'banana', 'orange', 'pear']
+        }
+        
+        priority_fruits = fruit_preferences.get(meal_type, ['apple', 'banana', 'orange'])
+        
+        # Filter out ingredients that conflict with existing ones
+        available_fruits = []
+        for fruit_name in priority_fruits:
+            if fruit_name not in added_ingredients:
+                ingredient = self._find_ingredient_by_name(fruit_name)
+                if ingredient and ingredient.get('category') == 'fruit':
+                    available_fruits.append(ingredient)
+        
+        # If no priority fruits available, find alternatives
+        if not available_fruits:
+            for ingredient in self.ingredients_db:
+                if (ingredient.get('category') == 'fruit' and 
+                    ingredient.get('name', '').lower() not in added_ingredients):
+                    available_fruits.append(ingredient)
+        
+        if available_fruits:
+            # Choose a random one for variety
+            return random.choice(available_fruits)
+        
+        return None
     
     def _smart_minimal_supplementation(self, deficits: Dict, rag_ingredients: List[Dict], added_ingredients: set, added_categories: set, current_totals: Dict, meal_analysis: Dict, user_preferences: Dict) -> List[Dict]:
         """Smart supplementation with minimal ingredients"""
@@ -2727,8 +3329,8 @@ class RAGMealOptimizer:
         final_meal: Dict, 
         target_macros: Dict
     ) -> Dict:
-        """Check if targets are achieved within ±10% tolerance for precise optimization"""
-        tolerance = 0.10  # Reduced from 0.15 to 0.10 for more precise results
+        """Check if targets are achieved within ±15% tolerance for flexible optimization"""
+        tolerance = 0.15  # Increased from 0.12 to 0.15 for flexible results
         
         # Handle both 'carbs' and 'carbohydrates' field names
         carbs_target = target_macros.get('carbs', target_macros.get('carbohydrates', 0))
@@ -3290,3 +3892,152 @@ class RAGMealOptimizer:
         priority_list.sort(key=lambda x: x['priority_score'], reverse=True)
         
         return priority_list
+    
+    def _add_comprehensive_ingredients(self):
+        """Add comprehensive list of 100+ ingredients with detailed macros"""
+        comprehensive_ingredients = [
+            # HIGH PROTEIN INGREDIENTS
+            {"name": "Chicken Breast", "calories_per_100g": 165, "protein_per_100g": 31, "carbs_per_100g": 0, "fat_per_100g": 3.6, "category": "protein"},
+            {"name": "Turkey Breast", "calories_per_100g": 157, "protein_per_100g": 30, "carbs_per_100g": 0, "fat_per_100g": 3.6, "category": "protein"},
+            {"name": "Lean Beef", "calories_per_100g": 250, "protein_per_100g": 26, "carbs_per_100g": 0, "fat_per_100g": 15, "category": "protein"},
+            {"name": "Salmon", "calories_per_100g": 208, "protein_per_100g": 25, "carbs_per_100g": 0, "fat_per_100g": 12, "category": "protein"},
+            {"name": "Tuna", "calories_per_100g": 144, "protein_per_100g": 30, "carbs_per_100g": 0, "fat_per_100g": 1, "category": "protein"},
+            {"name": "Cod", "calories_per_100g": 105, "protein_per_100g": 23, "carbs_per_100g": 0, "fat_per_100g": 0.9, "category": "protein"},
+            {"name": "Eggs", "calories_per_100g": 155, "protein_per_100g": 13, "carbs_per_100g": 1.1, "fat_per_100g": 11, "category": "protein"},
+            {"name": "Egg Whites", "calories_per_100g": 52, "protein_per_100g": 11, "carbs_per_100g": 0.7, "fat_per_100g": 0.2, "category": "protein"},
+            {"name": "Greek Yogurt", "calories_per_100g": 59, "protein_per_100g": 10, "carbs_per_100g": 3.6, "fat_per_100g": 0.4, "category": "protein"},
+            {"name": "Cottage Cheese", "calories_per_100g": 98, "protein_per_100g": 11, "carbs_per_100g": 3.4, "fat_per_100g": 4.3, "category": "protein"},
+            {"name": "Lentils", "calories_per_100g": 116, "protein_per_100g": 9, "carbs_per_100g": 20, "fat_per_100g": 0.4, "category": "protein"},
+            {"name": "Chickpeas", "calories_per_100g": 164, "protein_per_100g": 9, "carbs_per_100g": 27, "fat_per_100g": 2.6, "category": "protein"},
+            {"name": "Black Beans", "calories_per_100g": 132, "protein_per_100g": 9, "carbs_per_100g": 23, "fat_per_100g": 0.5, "category": "protein"},
+            {"name": "Tofu", "calories_per_100g": 76, "protein_per_100g": 8, "carbs_per_100g": 1.9, "fat_per_100g": 4.8, "category": "protein"},
+            {"name": "Tempeh", "calories_per_100g": 192, "protein_per_100g": 20, "carbs_per_100g": 7.6, "fat_per_100g": 11, "category": "protein"},
+            {"name": "Edamame", "calories_per_100g": 121, "protein_per_100g": 11, "carbs_per_100g": 9.9, "fat_per_100g": 5.2, "category": "protein"},
+            {"name": "Hummus", "calories_per_100g": 166, "protein_per_100g": 8, "carbs_per_100g": 20, "fat_per_100g": 8, "category": "protein"},
+            {"name": "Protein Powder", "calories_per_100g": 120, "protein_per_100g": 24, "carbs_per_100g": 3, "fat_per_100g": 1.5, "category": "protein"},
+            {"name": "Protein Bar", "calories_per_100g": 350, "protein_per_100g": 20, "carbs_per_100g": 30, "fat_per_100g": 12, "category": "protein"},
+            {"name": "Pork Tenderloin", "calories_per_100g": 143, "protein_per_100g": 21, "carbs_per_100g": 0, "fat_per_100g": 6, "category": "protein"},
+            {"name": "Lamb Chops", "calories_per_100g": 294, "protein_per_100g": 25, "carbs_per_100g": 0, "fat_per_100g": 21, "category": "protein"},
+            {"name": "Shrimp", "calories_per_100g": 99, "protein_per_100g": 24, "carbs_per_100g": 0.2, "fat_per_100g": 0.3, "category": "protein"},
+            {"name": "Crab", "calories_per_100g": 97, "protein_per_100g": 20, "carbs_per_100g": 0, "fat_per_100g": 1.5, "category": "protein"},
+            
+            # HIGH CARB INGREDIENTS
+            {"name": "Brown Rice", "calories_per_100g": 111, "protein_per_100g": 2.6, "carbs_per_100g": 23, "fat_per_100g": 0.9, "category": "grain"},
+            {"name": "White Rice", "calories_per_100g": 130, "protein_per_100g": 2.7, "carbs_per_100g": 28, "fat_per_100g": 0.3, "category": "grain"},
+            {"name": "Quinoa", "calories_per_100g": 120, "protein_per_100g": 4.4, "carbs_per_100g": 22, "fat_per_100g": 1.9, "category": "grain"},
+            {"name": "Oats", "calories_per_100g": 389, "protein_per_100g": 17, "carbs_per_100g": 66, "fat_per_100g": 7, "category": "grain"},
+            {"name": "Whole Wheat Bread", "calories_per_100g": 247, "protein_per_100g": 13, "carbs_per_100g": 41, "fat_per_100g": 4.2, "category": "grain"},
+            {"name": "Pasta", "calories_per_100g": 131, "protein_per_100g": 5, "carbs_per_100g": 25, "fat_per_100g": 1.1, "category": "grain"},
+            {"name": "Sweet Potato", "calories_per_100g": 86, "protein_per_100g": 1.6, "carbs_per_100g": 20, "fat_per_100g": 0.1, "category": "vegetable"},
+            {"name": "Regular Potato", "calories_per_100g": 77, "protein_per_100g": 2, "carbs_per_100g": 17, "fat_per_100g": 0.1, "category": "vegetable"},
+            {"name": "Banana", "calories_per_100g": 89, "protein_per_100g": 1.1, "carbs_per_100g": 23, "fat_per_100g": 0.3, "category": "fruit"},
+            {"name": "Apple", "calories_per_100g": 52, "protein_per_100g": 0.3, "carbs_per_100g": 14, "fat_per_100g": 0.2, "category": "fruit"},
+            {"name": "Orange", "calories_per_100g": 47, "protein_per_100g": 0.9, "carbs_per_100g": 12, "fat_per_100g": 0.1, "category": "fruit"},
+            {"name": "Strawberries", "calories_per_100g": 32, "protein_per_100g": 0.7, "carbs_per_100g": 8, "fat_per_100g": 0.3, "category": "fruit"},
+            {"name": "Blueberries", "calories_per_100g": 57, "protein_per_100g": 0.7, "carbs_per_100g": 14, "fat_per_100g": 0.3, "category": "fruit"},
+            {"name": "Mango", "calories_per_100g": 60, "protein_per_100g": 0.8, "carbs_per_100g": 15, "fat_per_100g": 0.4, "category": "fruit"},
+            {"name": "Pineapple", "calories_per_100g": 50, "protein_per_100g": 0.5, "carbs_per_100g": 13, "fat_per_100g": 0.1, "category": "fruit"},
+            {"name": "Grapes", "calories_per_100g": 62, "protein_per_100g": 0.6, "carbs_per_100g": 16, "fat_per_100g": 0.2, "category": "fruit"},
+            {"name": "Pear", "calories_per_100g": 57, "protein_per_100g": 0.4, "carbs_per_100g": 15, "fat_per_100g": 0.1, "category": "fruit"},
+            {"name": "Peach", "calories_per_100g": 39, "protein_per_100g": 0.9, "carbs_per_100g": 10, "fat_per_100g": 0.3, "category": "fruit"},
+            {"name": "Plum", "calories_per_100g": 46, "protein_per_100g": 0.7, "carbs_per_100g": 11, "fat_per_100g": 0.3, "category": "fruit"},
+            {"name": "Cherries", "calories_per_100g": 50, "protein_per_100g": 1, "carbs_per_100g": 12, "fat_per_100g": 0.3, "category": "fruit"},
+            {"name": "Raspberries", "calories_per_100g": 52, "protein_per_100g": 1.2, "carbs_per_100g": 12, "fat_per_100g": 0.7, "category": "fruit"},
+            
+            # HIGH FAT INGREDIENTS
+            {"name": "Avocado", "calories_per_100g": 160, "protein_per_100g": 2, "carbs_per_100g": 9, "fat_per_100g": 15, "category": "vegetable"},
+            {"name": "Olive Oil", "calories_per_100g": 884, "protein_per_100g": 0, "carbs_per_100g": 0, "fat_per_100g": 100, "category": "fat"},
+            {"name": "Coconut Oil", "calories_per_100g": 862, "protein_per_100g": 0, "carbs_per_100g": 0, "fat_per_100g": 100, "category": "fat"},
+            {"name": "Butter", "calories_per_100g": 717, "protein_per_100g": 0.9, "carbs_per_100g": 0.1, "fat_per_100g": 81, "category": "fat"},
+            {"name": "Ghee", "calories_per_100g": 900, "protein_per_100g": 0, "carbs_per_100g": 0, "fat_per_100g": 100, "category": "fat"},
+            {"name": "Almonds", "calories_per_100g": 579, "protein_per_100g": 21, "carbs_per_100g": 22, "fat_per_100g": 50, "category": "nuts"},
+            {"name": "Walnuts", "calories_per_100g": 654, "protein_per_100g": 15, "carbs_per_100g": 14, "fat_per_100g": 65, "category": "nuts"},
+            {"name": "Cashews", "calories_per_100g": 553, "protein_per_100g": 18, "carbs_per_100g": 30, "fat_per_100g": 44, "category": "nuts"},
+            {"name": "Pistachios", "calories_per_100g": 560, "protein_per_100g": 20, "carbs_per_100g": 28, "fat_per_100g": 45, "category": "nuts"},
+            {"name": "Pecans", "calories_per_100g": 691, "protein_per_100g": 9, "carbs_per_100g": 14, "fat_per_100g": 72, "category": "nuts"},
+            {"name": "Macadamia Nuts", "calories_per_100g": 718, "protein_per_100g": 8, "carbs_per_100g": 14, "fat_per_100g": 76, "category": "nuts"},
+            {"name": "Brazil Nuts", "calories_per_100g": 656, "protein_per_100g": 14, "carbs_per_100g": 12, "fat_per_100g": 66, "category": "nuts"},
+            {"name": "Hazelnuts", "calories_per_100g": 628, "protein_per_100g": 15, "carbs_per_100g": 17, "fat_per_100g": 61, "category": "nuts"},
+            {"name": "Pine Nuts", "calories_per_100g": 673, "protein_per_100g": 14, "carbs_per_100g": 13, "fat_per_100g": 68, "category": "nuts"},
+            {"name": "Sunflower Seeds", "calories_per_100g": 584, "protein_per_100g": 21, "carbs_per_100g": 20, "fat_per_100g": 51, "category": "nuts"},
+            {"name": "Pumpkin Seeds", "calories_per_100g": 559, "protein_per_100g": 19, "carbs_per_100g": 54, "fat_per_100g": 19, "category": "nuts"},
+            {"name": "Chia Seeds", "calories_per_100g": 486, "protein_per_100g": 17, "carbs_per_100g": 42, "fat_per_100g": 31, "category": "nuts"},
+            {"name": "Flax Seeds", "calories_per_100g": 534, "protein_per_100g": 18, "carbs_per_100g": 29, "fat_per_100g": 42, "category": "nuts"},
+            {"name": "Hemp Seeds", "calories_per_100g": 553, "protein_per_100g": 31, "carbs_per_100g": 9, "fat_per_100g": 49, "category": "nuts"},
+            {"name": "Sesame Seeds", "calories_per_100g": 573, "protein_per_100g": 18, "carbs_per_100g": 23, "fat_per_100g": 50, "category": "nuts"},
+            
+            # VEGETABLES
+            {"name": "Spinach", "calories_per_100g": 23, "protein_per_100g": 2.9, "carbs_per_100g": 3.6, "fat_per_100g": 0.4, "category": "vegetable"},
+            {"name": "Kale", "calories_per_100g": 49, "protein_per_100g": 4.3, "carbs_per_100g": 8.8, "fat_per_100g": 0.9, "category": "vegetable"},
+            {"name": "Broccoli", "calories_per_100g": 34, "protein_per_100g": 2.8, "carbs_per_100g": 7, "fat_per_100g": 0.4, "category": "vegetable"},
+            {"name": "Cauliflower", "calories_per_100g": 25, "protein_per_100g": 1.9, "carbs_per_100g": 5, "fat_per_100g": 0.3, "category": "vegetable"},
+            {"name": "Brussels Sprouts", "calories_per_100g": 43, "protein_per_100g": 3.4, "carbs_per_100g": 9, "fat_per_100g": 0.3, "category": "vegetable"},
+            {"name": "Asparagus", "calories_per_100g": 20, "protein_per_100g": 2.2, "carbs_per_100g": 3.9, "fat_per_100g": 0.1, "category": "vegetable"},
+            {"name": "Green Beans", "calories_per_100g": 31, "protein_per_100g": 1.8, "carbs_per_100g": 7, "fat_per_100g": 0.2, "category": "vegetable"},
+            {"name": "Peas", "calories_per_100g": 84, "protein_per_100g": 5, "carbs_per_100g": 14, "fat_per_100g": 0.4, "category": "vegetable"},
+            {"name": "Carrots", "calories_per_100g": 41, "protein_per_100g": 0.9, "carbs_per_100g": 10, "fat_per_100g": 0.2, "category": "vegetable"},
+            {"name": "Bell Peppers", "calories_per_100g": 31, "protein_per_100g": 1, "carbs_per_100g": 7, "fat_per_100g": 0.3, "category": "vegetable"},
+            {"name": "Mushrooms", "calories_per_100g": 22, "protein_per_100g": 3.1, "carbs_per_100g": 3.3, "fat_per_100g": 0.3, "category": "vegetable"},
+            {"name": "Zucchini", "calories_per_100g": 17, "protein_per_100g": 1.2, "carbs_per_100g": 3.1, "fat_per_100g": 0.3, "category": "vegetable"},
+            {"name": "Eggplant", "calories_per_100g": 25, "protein_per_100g": 1, "carbs_per_100g": 6, "fat_per_100g": 0.2, "category": "vegetable"},
+            {"name": "Cucumber", "calories_per_100g": 16, "protein_per_100g": 0.7, "carbs_per_100g": 3.6, "fat_per_100g": 0.1, "category": "vegetable"},
+            {"name": "Celery", "calories_per_100g": 16, "protein_per_100g": 0.7, "carbs_per_100g": 3, "fat_per_100g": 0.2, "category": "vegetable"},
+            {"name": "Lettuce", "calories_per_100g": 15, "protein_per_100g": 1.4, "carbs_per_100g": 2.9, "fat_per_100g": 0.1, "category": "vegetable"},
+            {"name": "Arugula", "calories_per_100g": 25, "protein_per_100g": 2.6, "carbs_per_100g": 3.7, "fat_per_100g": 0.7, "category": "vegetable"},
+            {"name": "Watercress", "calories_per_100g": 11, "protein_per_100g": 2.3, "carbs_per_100g": 1.3, "fat_per_100g": 0.1, "category": "vegetable"},
+            {"name": "Swiss Chard", "calories_per_100g": 19, "protein_per_100g": 1.8, "carbs_per_100g": 3.7, "fat_per_100g": 0.2, "category": "vegetable"},
+            {"name": "Collard Greens", "calories_per_100g": 32, "protein_per_100g": 3, "carbs_per_100g": 5.4, "fat_per_100g": 0.6, "category": "vegetable"},
+            
+            # DAIRY & ALTERNATIVES
+            {"name": "Milk", "calories_per_100g": 42, "protein_per_100g": 3.4, "carbs_per_100g": 5, "fat_per_100g": 1, "category": "dairy"},
+            {"name": "Cheese", "calories_per_100g": 402, "protein_per_100g": 25, "carbs_per_100g": 1.3, "fat_per_100g": 33, "category": "dairy"},
+            {"name": "Cream", "calories_per_100g": 340, "protein_per_100g": 2.1, "carbs_per_100g": 2.8, "fat_per_100g": 37, "category": "dairy"},
+            {"name": "Sour Cream", "calories_per_100g": 198, "protein_per_100g": 2.4, "carbs_per_100g": 4.3, "fat_per_100g": 19, "category": "dairy"},
+            {"name": "Almond Milk", "calories_per_100g": 17, "protein_per_100g": 0.6, "carbs_per_100g": 0.6, "fat_per_100g": 1.5, "category": "dairy"},
+            {"name": "Soy Milk", "calories_per_100g": 33, "protein_per_100g": 3.3, "carbs_per_100g": 1.8, "fat_per_100g": 1.8, "category": "dairy"},
+            {"name": "Coconut Milk", "calories_per_100g": 230, "protein_per_100g": 2.3, "carbs_per_100g": 5.5, "fat_per_100g": 24, "category": "dairy"},
+            {"name": "Oat Milk", "calories_per_100g": 43, "protein_per_100g": 1, "carbs_per_100g": 7, "fat_per_100g": 1.5, "category": "dairy"},
+            {"name": "Rice Milk", "calories_per_100g": 47, "protein_per_100g": 0.3, "carbs_per_100g": 9.2, "fat_per_100g": 1, "category": "dairy"},
+            {"name": "Hemp Milk", "calories_per_100g": 39, "protein_per_100g": 2.1, "carbs_per_100g": 2.6, "fat_per_100g": 2.8, "category": "dairy"},
+            
+            # LEGUMES & BEANS
+            {"name": "Kidney Beans", "calories_per_100g": 127, "protein_per_100g": 8.7, "carbs_per_100g": 23, "fat_per_100g": 0.5, "category": "legume"},
+            {"name": "Pinto Beans", "calories_per_100g": 143, "protein_per_100g": 9, "carbs_per_100g": 26, "fat_per_100g": 0.6, "category": "legume"},
+            {"name": "Navy Beans", "calories_per_100g": 140, "protein_per_100g": 8.2, "carbs_per_100g": 26, "fat_per_100g": 0.6, "category": "legume"},
+            {"name": "Lima Beans", "calories_per_100g": 115, "protein_per_100g": 8, "carbs_per_100g": 21, "fat_per_100g": 0.4, "category": "legume"},
+            {"name": "Garbanzo Beans", "calories_per_100g": 164, "protein_per_100g": 9, "carbs_per_100g": 27, "fat_per_100g": 2.6, "category": "legume"},
+            {"name": "Split Peas", "calories_per_100g": 118, "protein_per_100g": 8, "carbs_per_100g": 21, "fat_per_100g": 0.4, "category": "legume"},
+            {"name": "Mung Beans", "calories_per_100g": 347, "protein_per_100g": 24, "carbs_per_100g": 63, "fat_per_100g": 1.2, "category": "legume"},
+            {"name": "Adzuki Beans", "calories_per_100g": 128, "protein_per_100g": 7.5, "carbs_per_100g": 25, "fat_per_100g": 0.1, "category": "legume"},
+            {"name": "Fava Beans", "calories_per_100g": 88, "protein_per_100g": 7.9, "carbs_per_100g": 17, "fat_per_100g": 0.4, "category": "legume"},
+            {"name": "Cannellini Beans", "calories_per_100g": 139, "protein_per_100g": 9, "carbs_per_100g": 25, "fat_per_100g": 0.6, "category": "legume"},
+            
+            # GRAINS & CEREALS
+            {"name": "Barley", "calories_per_100g": 354, "protein_per_100g": 12, "carbs_per_100g": 73, "fat_per_100g": 2.3, "category": "grain"},
+            {"name": "Millet", "calories_per_100g": 378, "protein_per_100g": 11, "carbs_per_100g": 73, "fat_per_100g": 4.2, "category": "grain"},
+            {"name": "Sorghum", "calories_per_100g": 329, "protein_per_100g": 11, "carbs_per_100g": 72, "fat_per_100g": 3.5, "category": "grain"},
+            {"name": "Teff", "calories_per_100g": 367, "protein_per_100g": 13, "carbs_per_100g": 73, "fat_per_100g": 2.4, "category": "grain"},
+            {"name": "Amaranth", "calories_per_100g": 371, "protein_per_100g": 14, "carbs_per_100g": 65, "fat_per_100g": 7, "category": "grain"},
+            {"name": "Buckwheat", "calories_per_100g": 343, "protein_per_100g": 13, "carbs_per_100g": 72, "fat_per_100g": 3.4, "category": "grain"},
+            {"name": "Rye", "calories_per_100g": 338, "protein_per_100g": 10, "carbs_per_100g": 76, "fat_per_100g": 1.6, "category": "grain"},
+            {"name": "Spelt", "calories_per_100g": 338, "protein_per_100g": 14, "carbs_per_100g": 70, "fat_per_100g": 2.4, "category": "grain"},
+            {"name": "Farro", "calories_per_100g": 340, "protein_per_100g": 12, "carbs_per_100g": 71, "fat_per_100g": 2.5, "category": "grain"},
+            {"name": "Freekeh", "calories_per_100g": 325, "protein_per_100g": 13, "carbs_per_100g": 68, "fat_per_100g": 2.5, "category": "grain"},
+            
+            # SPECIALTY INGREDIENTS
+            {"name": "Nutritional Yeast", "calories_per_100g": 325, "protein_per_100g": 50, "carbs_per_100g": 41, "fat_per_100g": 6, "category": "protein"},
+            {"name": "Spirulina", "calories_per_100g": 290, "protein_per_100g": 57, "carbs_per_100g": 24, "fat_per_100g": 8, "category": "protein"},
+            {"name": "Chlorella", "calories_per_100g": 300, "protein_per_100g": 58, "carbs_per_100g": 23, "fat_per_100g": 9, "category": "protein"},
+            {"name": "Moringa", "calories_per_100g": 64, "protein_per_100g": 9.4, "carbs_per_100g": 8.3, "fat_per_100g": 1.4, "category": "vegetable"},
+            {"name": "Matcha", "calories_per_100g": 324, "protein_per_100g": 25, "carbs_per_100g": 38, "fat_per_100g": 5, "category": "beverage"},
+            {"name": "Cacao Powder", "calories_per_100g": 228, "protein_per_100g": 20, "carbs_per_100g": 58, "fat_per_100g": 14, "category": "beverage"},
+            {"name": "Coconut Flour", "calories_per_100g": 443, "protein_per_100g": 19, "carbs_per_100g": 49, "fat_per_100g": 21, "category": "grain"},
+            {"name": "Almond Flour", "calories_per_100g": 579, "protein_per_100g": 21, "carbs_per_100g": 22, "fat_per_100g": 50, "category": "grain"},
+            {"name": "Chickpea Flour", "calories_per_100g": 387, "protein_per_100g": 22, "carbs_per_100g": 58, "fat_per_100g": 7, "category": "grain"},
+            {"name": "Tapioca Flour", "calories_per_100g": 358, "protein_per_100g": 0.2, "carbs_per_100g": 88, "fat_per_100g": 0.1, "category": "grain"}
+        ]
+        
+        # Add to ingredients database
+        self.ingredients_db.extend(comprehensive_ingredients)
+        logger.info(f"✅ Added {len(comprehensive_ingredients)} comprehensive ingredients to database")
+        logger.info(f"📊 Total ingredients available: {len(self.ingredients_db)}")

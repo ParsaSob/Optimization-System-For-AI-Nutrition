@@ -1,61 +1,73 @@
 #!/usr/bin/env python3
 """
-Railway Startup Script
-Handles PORT environment variable and starts uvicorn properly
+Start script for RAG Meal Optimization System
+Automatically detects and runs the appropriate server
 """
 
 import os
 import sys
-import subprocess
-import logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-def get_port():
-    """Get port from environment or use default"""
-    port = os.environ.get('PORT')
-    if port:
-        try:
-            return int(port)
-        except ValueError:
-            logger.warning(f"Invalid PORT value: {port}, using default 8000")
-            return 8000
-    return 8000
-
-def main():
-    """Main startup function"""
-    port = get_port()
-    host = "0.0.0.0"
+def start_flask_server():
+    """Start Flask backend server"""
+    print("🚀 Starting Flask Backend Server...")
+    from backend_server import app
     
-    logger.info(f"🚀 Starting Meal Optimization API on {host}:{port}")
-    logger.info(f"🔧 Environment: PORT={os.environ.get('PORT', 'not_set')}")
-    logger.info(f"🌍 Using: host={host}, port={port}")
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('FLASK_ENV') == 'development'
     
-    # Build uvicorn command
-    cmd = [
-        sys.executable, "-m", "uvicorn",
-        "main:app",
-        "--host", host,
-        "--port", str(port),
-        "--workers", "1"
-    ]
-    
-    logger.info(f"🚀 Command: {' '.join(cmd)}")
+    print(f"🌐 Flask server starting on port: {port}")
+    print(f"🔧 Debug mode: {debug_mode}")
     
     try:
-        # Start uvicorn
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"❌ Failed to start uvicorn: {e}")
+        app.run(host='0.0.0.0', port=port, debug=debug_mode, threaded=True)
+    except Exception as e:
+        print(f"❌ Error starting Flask server: {e}")
         sys.exit(1)
-    except KeyboardInterrupt:
-        logger.info("🛑 Shutting down...")
-        sys.exit(0)
+
+def start_fastapi_server():
+    """Start FastAPI server"""
+    print("🚀 Starting FastAPI Server...")
+    import uvicorn
+    from main import app
+    
+    port = int(os.environ.get('PORT', 8000))
+    
+    print(f"🌐 FastAPI server starting on port: {port}")
+    
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except Exception as e:
+        print(f"❌ Error starting FastAPI server: {e}")
+        sys.exit(1)
+
+def main():
+    """Main function to determine which server to start"""
+    print("🔍 Detecting server type...")
+    
+    # Check environment variables
+    server_type = os.environ.get('SERVER_TYPE', 'auto')
+    
+    if server_type == 'flask':
+        print("📋 Using Flask server (explicitly set)")
+        start_flask_server()
+    elif server_type == 'fastapi':
+        print("📋 Using FastAPI server (explicitly set)")
+        start_fastapi_server()
+    else:
+        # Auto-detect based on available files
+        if os.path.exists('backend_server.py'):
+            print("📋 Auto-detected: Flask backend server available")
+            start_flask_server()
+        elif os.path.exists('main.py'):
+            print("📋 Auto-detected: FastAPI main server available")
+            start_fastapi_server()
+        else:
+            print("❌ No server files found!")
+            print("Available files:")
+            for file in os.listdir('.'):
+                if file.endswith('.py'):
+                    print(f"  - {file}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()

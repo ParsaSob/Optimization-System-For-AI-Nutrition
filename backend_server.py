@@ -21,6 +21,40 @@ import time
 app = Flask(__name__)
 CORS(app)
 
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint for health check and API information"""
+    return jsonify({
+        "message": "Persian Meal Optimization API is running",
+        "status": "healthy",
+        "version": "1.0.0",
+        "endpoints": {
+            "health": "/health",
+            "optimize_single_meal": "/optimize-single-meal",
+            "optimize_single_meal_rag": "/optimize-single-meal-rag",
+            "optimize_single_meal_rag_advanced": "/optimize-single-meal-rag-advanced",
+            "ingredients": "/api/ingredients",
+            "rag_ingredients": "/api/rag-ingredients"
+        },
+        "railway_info": {
+            "port_env": os.environ.get("PORT", "not_set"),
+            "python_version": os.environ.get("PYTHON_VERSION", "not_set"),
+            "message": f"Render deployment - using port {os.environ.get('PORT', 'not_set')}"
+        }
+    })
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy", 
+        "message": "Persian Meal Optimization API is running",
+        "render_status": {
+            "port_env": os.environ.get("PORT", "not_set"),
+            "message": f"Render deployment - using port {os.environ.get('PORT', 'not_set')}"
+        }
+    })
+
 class RealMealOptimizer:
     """Real meal optimization engine that replaces mock responses"""
     
@@ -337,15 +371,6 @@ class RealMealOptimizer:
 optimizer = RealMealOptimizer()
 single_meal_optimizer = SingleMealOptimizer()
 rag_meal_optimizer = RAGMealOptimizer()
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        "status": "healthy",
-        "service": "Persian Meal Optimization Backend",
-        "version": "1.0.0"
-    })
 
 @app.route('/optimize-single-meal', methods=['POST'])
 def optimize_single_meal():

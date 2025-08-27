@@ -1,9 +1,21 @@
 #!/bin/bash
+# Start script for RAG Meal Optimization System on Render
 
-# Get port from environment variable or default to 8000
-PORT=${PORT:-8000}
+echo "🚀 Starting RAG Meal Optimization System..."
+echo "🔧 Environment: $FLASK_ENV"
+echo "🌐 Port: $PORT"
+echo "📁 Working directory: $(pwd)"
+echo "📋 Available files:"
+ls -la
 
-echo "🚀 Starting Meal Optimization API on port $PORT"
+echo ""
+echo "🔍 Checking Python version..."
+python --version
 
-# Start uvicorn with the resolved port
-exec uvicorn main:app --host 0.0.0.0 --port $PORT
+echo ""
+echo "🔍 Checking dependencies..."
+pip list | grep -E "(flask|fastapi|uvicorn)"
+
+echo ""
+echo "🚀 Starting Flask server..."
+python start.py

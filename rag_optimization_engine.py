@@ -393,61 +393,23 @@ class RAGMealOptimizer:
             # Calculate macro deficits
             deficits = self._calculate_macro_deficits(current_totals, target_macros)
             
-            # FIRST: Try to optimize WITHOUT adding ingredients
-            logger.info(f"🔄 First attempt: Optimizing WITHOUT adding ingredients...")
-            optimization_result = self._optimize_quantities(
-                rag_ingredients, target_macros, user_preferences
+            # ALWAYS add supplementary ingredients for better nutrition and variety
+            logger.info(f"🔍 Always adding supplementary ingredients for optimal nutrition...")
+            
+            # Find supplementary ingredients to fill gaps
+            supplementary_ingredients = self._find_supplementary_ingredients(
+                deficits, rag_ingredients, user_preferences, meal_type
             )
             
-            # Check if targets are actually met after first optimization
-            if optimization_result['success']:
-                # Calculate what we achieved with just RAG ingredients
-                quantities = optimization_result.get('quantities', [])
-                if len(quantities) == len(rag_ingredients):
-                    temp_meal = self._calculate_final_meal(rag_ingredients, quantities)
-                    temp_achievement = self._check_target_achievement(temp_meal, target_macros)
-                    
-                    if temp_achievement['overall_achieved']:
-                        logger.info(f"✅ Success! Targets met without adding ingredients using {optimization_result['method']}")
-                        all_ingredients = rag_ingredients
-                        supplementary_ingredients = []
-                    else:
-                        logger.info(f"⚠️ First optimization succeeded but targets not met. Adding supplementary ingredients...")
-                        # Find supplementary ingredients to fill gaps
-                        supplementary_ingredients = self._find_supplementary_ingredients(
-                            deficits, rag_ingredients, user_preferences, meal_type
-                        )
-                        
-                        # Combine RAG and supplementary ingredients
-                        all_ingredients = rag_ingredients + supplementary_ingredients
-                        
-                        # Try optimization again with supplementary ingredients
-                        optimization_result = self._optimize_quantities(
-                            all_ingredients, target_macros, user_preferences
-                        )
-                else:
-                    logger.info(f"⚠️ First optimization succeeded but quantity mismatch. Adding supplementary ingredients...")
-                    supplementary_ingredients = self._find_supplementary_ingredients(
-                        deficits, rag_ingredients, user_preferences, meal_type
-                    )
-                    all_ingredients = rag_ingredients + supplementary_ingredients
-                    optimization_result = self._optimize_quantities(
-                        all_ingredients, target_macros, user_preferences
-                    )
-            else:
-                logger.info(f"❌ Failed to meet targets without adding ingredients. Adding supplementary ingredients...")
-                # Find supplementary ingredients to fill gaps
-                supplementary_ingredients = self._find_supplementary_ingredients(
-                    deficits, rag_ingredients, user_preferences, meal_type
-                )
-                
-                # Combine RAG and supplementary ingredients
-                all_ingredients = rag_ingredients + supplementary_ingredients
-                
-                # Try optimization again with supplementary ingredients
-                optimization_result = self._optimize_quantities(
-                    all_ingredients, target_macros, user_preferences
-                )
+            # Combine RAG and supplementary ingredients
+            all_ingredients = rag_ingredients + supplementary_ingredients
+            
+            logger.info(f"📊 Total ingredients: {len(rag_ingredients)} RAG + {len(supplementary_ingredients)} supplementary = {len(all_ingredients)} total")
+            
+            # Optimize with ALL ingredients (RAG + supplementary)
+            optimization_result = self._optimize_quantities(
+                all_ingredients, target_macros, user_preferences
+            )
             
             # Ensure we have at least one ingredient
             if not all_ingredients:
@@ -456,10 +418,22 @@ class RAGMealOptimizer:
             # Set current_ingredients for optimization methods to access
             self.current_ingredients = all_ingredients
             
-            # Final optimization with all ingredients
-            optimization_result = self._optimize_quantities(
+            # FINAL GENETIC OPTIMIZATION: Optimize all ingredients simultaneously for precise targets
+            logger.info(f"🧬 FINAL: Running genetic optimization for precise target achievement...")
+            
+            final_optimization_result = self._genetic_optimize_for_targets(
                 all_ingredients, target_macros, user_preferences
             )
+            
+            if final_optimization_result['success']:
+                logger.info(f"✅ Genetic optimization successful: {final_optimization_result['method']}")
+                optimization_result = final_optimization_result
+            else:
+                logger.info(f"⚠️ Genetic optimization failed, using standard optimization...")
+                # Fallback to standard optimization
+                optimization_result = self._optimize_quantities(
+                    all_ingredients, target_macros, user_preferences
+                )
             
             # If optimization fails, raise error instead of using fallback
             if not optimization_result['success']:
@@ -612,6 +586,168 @@ class RAGMealOptimizer:
             deficits[macro] = deficit
         
         return deficits
+    
+    def _genetic_optimize_for_targets(self, ingredients: List[Dict], target_macros: Dict, user_preferences: Dict) -> Dict:
+        """
+        Genetic algorithm to optimize ingredient quantities for precise target achievement
+        This method optimizes ALL macros simultaneously
+        """
+        logger.info(f"🧬 Genetic optimization: {len(ingredients)} ingredients, targets: {target_macros}")
+        
+        try:
+            # Genetic algorithm parameters
+            population_size = 50
+            generations = 100
+            mutation_rate = 0.1
+            crossover_rate = 0.8
+            
+            # Initialize population with random quantities
+            population = self._initialize_genetic_population(ingredients, population_size)
+            
+            best_solution = None
+            best_fitness = float('inf')
+            
+            for generation in range(generations):
+                # Evaluate fitness for all individuals
+                fitness_scores = []
+                for individual in population:
+                    fitness = self._calculate_genetic_fitness(individual, target_macros, ingredients)
+                    fitness_scores.append((fitness, individual))
+                
+                # Sort by fitness (lower is better)
+                fitness_scores.sort(key=lambda x: x[0])
+                
+                # Update best solution
+                if fitness_scores[0][0] < best_fitness:
+                    best_fitness = fitness_scores[0][0]
+                    best_solution = fitness_scores[0][1].copy()
+                    logger.info(f"🧬 Generation {generation}: New best fitness = {best_fitness:.2f}")
+                
+                # Check if we've reached target (fitness < 0.1 means very close)
+                if best_fitness < 0.1:
+                    logger.info(f"🎯 Target reached at generation {generation}!")
+                    break
+                
+                # Selection: Keep top 20% and random 10%
+                elite_count = int(population_size * 0.2)
+                random_count = int(population_size * 0.1)
+                
+                new_population = []
+                
+                # Elite individuals
+                for i in range(elite_count):
+                    new_population.append(fitness_scores[i][1])
+                
+                # Random individuals for diversity
+                import random
+                for i in range(random_count):
+                    new_population.append(random.choice(fitness_scores)[1])
+                
+                # Generate new individuals through crossover and mutation
+                while len(new_population) < population_size:
+                    if random.random() < crossover_rate:
+                        # Crossover
+                        parent1 = random.choice(new_population)
+                        parent2 = random.choice(new_population)
+                        child = self._crossover_individuals(parent1, parent2)
+                    else:
+                        # Mutation
+                        parent = random.choice(new_population)
+                        child = self._mutate_individual(parent, mutation_rate)
+                    
+                    new_population.append(child)
+                
+                population = new_population
+            
+            if best_solution:
+                # Convert back to quantities format
+                quantities = []
+                for i, quantity in enumerate(best_solution):
+                    quantities.append(max(1, quantity))  # Ensure minimum 1g
+                
+                logger.info(f"✅ Genetic optimization completed: fitness = {best_fitness:.2f}")
+                
+                return {
+                    'success': True,
+                    'method': 'Genetic Algorithm',
+                    'quantities': quantities,
+                    'fitness': best_fitness
+                }
+            else:
+                logger.warning("⚠️ Genetic optimization failed to find solution")
+                return {'success': False, 'method': 'Genetic Algorithm'}
+                
+        except Exception as e:
+            logger.error(f"❌ Genetic optimization error: {str(e)}")
+            return {'success': False, 'method': 'Genetic Algorithm', 'error': str(e)}
+    
+    def _initialize_genetic_population(self, ingredients: List[Dict], population_size: int) -> List[List[float]]:
+        """Initialize random population for genetic algorithm"""
+        population = []
+        
+        for _ in range(population_size):
+            individual = []
+            for ingredient in ingredients:
+                # Random quantity between 10g and 200g
+                import random
+                quantity = random.uniform(10, 200)
+                individual.append(quantity)
+            population.append(individual)
+        
+        return population
+    
+    def _calculate_genetic_fitness(self, individual: List[float], target_macros: Dict, ingredients: List[Dict]) -> float:
+        """Calculate fitness score for genetic algorithm (lower is better)"""
+        # Calculate actual macros from quantities
+        actual_macros = {'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0}
+        
+        for i, quantity in enumerate(individual):
+            ingredient = ingredients[i]
+            ratio = quantity / 100
+            
+            actual_macros['calories'] += ingredient.get('calories_per_100g', 0) * ratio
+            actual_macros['protein'] += ingredient.get('protein_per_100g', 0) * ratio
+            actual_macros['carbs'] += ingredient.get('carbs_per_100g', 0) * ratio
+            actual_macros['fat'] += ingredient.get('fat_per_100g', 0) * ratio
+        
+        # Calculate fitness as sum of squared differences (normalized)
+        fitness = 0
+        for macro in ['calories', 'protein', 'carbs', 'fat']:
+            target = target_macros[macro]
+            actual = actual_macros[macro]
+            
+            if target > 0:
+                # Normalize by target value
+                diff = abs(actual - target) / target
+                fitness += diff * diff  # Square the difference
+        
+        return fitness
+    
+    def _crossover_individuals(self, parent1: List[float], parent2: List[float]) -> List[float]:
+        """Perform crossover between two parent individuals"""
+        import random
+        
+        child = []
+        for i in range(len(parent1)):
+            if random.random() < 0.5:
+                child.append(parent1[i])
+            else:
+                child.append(parent2[i])
+        
+        return child
+    
+    def _mutate_individual(self, individual: List[float], mutation_rate: float) -> List[float]:
+        """Mutate an individual with given mutation rate"""
+        import random
+        
+        mutated = individual.copy()
+        for i in range(len(mutated)):
+            if random.random() < mutation_rate:
+                # Add/subtract up to 20% of current value
+                change = random.uniform(-0.2, 0.2) * mutated[i]
+                mutated[i] = max(1, mutated[i] + change)
+        
+        return mutated
     
     def _optimize_supplement_quantity(self, supplement: Dict, deficits: Dict, current_totals: Dict) -> Dict:
         """Optimize supplement quantity to meet deficits"""
@@ -937,8 +1073,11 @@ class RAGMealOptimizer:
             if fat_supplement:
                 supplement_fat = fat_supplement.get('fat_per_100g', 0)
                 if supplement_fat > 0:
+                    # PRECISE QUANTITY: Calculate exact quantity needed, don't exceed deficit
                     exact_quantity = (deficits['fat'] / supplement_fat) * 100
-                    exact_quantity = max(10, min(150, exact_quantity))  # Fat needs smaller quantities
+                    
+                    # Apply stricter bounds for fat to avoid exceeding target
+                    exact_quantity = max(5, min(exact_quantity, 100))  # Max 100g for fat
                     
                     fat_supplement['quantity_needed'] = round(exact_quantity, 1)
                     
@@ -970,8 +1109,11 @@ class RAGMealOptimizer:
             if calorie_supplement:
                 supplement_calories = calorie_supplement.get('calories_per_100g', 0)
                 if supplement_calories > 0:
+                    # PRECISE QUANTITY: Calculate exact quantity needed, don't exceed deficit
                     exact_quantity = (deficits['calories'] / supplement_calories) * 100
-                    exact_quantity = max(20, min(200, exact_quantity))
+                    
+                    # Apply stricter bounds for calories to avoid exceeding target
+                    exact_quantity = max(10, min(exact_quantity, 150))  # Max 150g for calories
                     
                     calorie_supplement['quantity_needed'] = round(exact_quantity, 1)
                     

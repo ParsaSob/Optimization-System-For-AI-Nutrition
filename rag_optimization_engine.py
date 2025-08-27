@@ -835,8 +835,8 @@ class RAGMealOptimizer:
             return 'other_grain'
 
     def _find_supplementary_ingredients(self, deficits: Dict, rag_ingredients: List[Dict], user_preferences: Dict, meal_type: str) -> List[Dict]:
-        """Find supplementary ingredients to meet macro targets with meal-type-aware logic"""
-        logger.info(f"🔍 Finding supplementary ingredients for {meal_type}...")
+        """Find supplementary ingredients using PRECISE mathematical optimization to meet targets exactly"""
+        logger.info(f"🔍 Finding supplementary ingredients for {meal_type} using PRECISE calculation...")
         
         # Analyze meal composition for better supplementation strategy
         meal_analysis = self._analyze_meal_composition(rag_ingredients, meal_type)
@@ -851,460 +851,268 @@ class RAGMealOptimizer:
         supplements = []
         
         # Debug logging for deficits
-        logger.info(f"🔍 Deficits: protein={deficits['protein']:.1f}g, carbs={deficits['carbs']:.1f}g, fat={deficits['fat']:.1f}g, calories={deficits['calories']:.1f}cal")
+        logger.info(f"🔍 PRECISE Deficits: protein={deficits['protein']:.1f}g, carbs={deficits['carbs']:.1f}g, fat={deficits['fat']:.1f}g, calories={deficits['calories']:.1f}cal")
         
-        # SMART LOGIC: Only add ingredients if truly needed and appropriate
-        # Check if we already have sufficient protein sources
-        existing_protein_sources = meal_analysis['protein_sources']
-        total_existing_protein = sum(ing.get('protein_per_100g', 0) * ing.get('quantity_needed', 100) / 100 for ing in existing_protein_sources)
-        # If quantity_needed is 0, use actual quantity from RAG ingredients
-        if total_existing_protein == 0:
-            total_existing_protein = sum(ing.get('protein_per_100g', 0) * ing.get('quantity', 100) / 100 for ing in existing_protein_sources)
-        
-        # AGGRESSIVE: Always add protein if there's a deficit, regardless of existing sources
-        if deficits['protein'] > 2:  # Add if any significant protein deficit
-            logger.info(f"🔍 Adding protein supplements: deficit={deficits['protein']:.1f}g, existing={total_existing_protein:.1f}g")
+        # PHASE 1: PRECISE PROTEIN SUPPLEMENTATION
+        if deficits['protein'] > 1:  # Any protein deficit
+            logger.info(f"🎯 PRECISE Protein supplementation: deficit={deficits['protein']:.1f}g")
             
-            # Try to add multiple protein sources if needed
-            remaining_protein_deficit = deficits['protein']
-            max_protein_attempts = 3  # Maximum 3 protein supplements
+            # Find the BEST protein source for this deficit
+            protein_supplement = self._find_optimal_protein_supplement(
+                deficits['protein'], meal_analysis, added_ingredients, added_categories
+            )
             
-            for attempt in range(max_protein_attempts):
-                if remaining_protein_deficit <= 2:  # Stop if deficit is small enough
-                    break
+            if protein_supplement:
+                # PRECISE QUANTITY CALCULATION: Calculate exact quantity needed
+                supplement_protein = protein_supplement.get('protein_per_100g', 0)
+                if supplement_protein > 0:
+                    # Calculate exact quantity needed to fill the deficit
+                    exact_quantity = (deficits['protein'] / supplement_protein) * 100
                     
-                protein_supplement = self._find_meal_appropriate_protein(
-                    remaining_protein_deficit, meal_analysis, added_ingredients, added_categories
-                )
-                
-                if protein_supplement:
-                    # Calculate how much protein this supplement will add
-                    supplement_protein = protein_supplement.get('protein_per_100g', 0)
-                    if supplement_protein > 0:
-                        # SMART QUANTITY CALCULATION: Calculate optimal quantity based on deficit and constraints
-                        # Calculate how much we need to add
-                        protein_needed = min(remaining_protein_deficit, 12)  # Don't add more than 12g at once
-                        
-                        # Calculate quantity needed
-                        estimated_quantity = (protein_needed / supplement_protein) * 100
-                        
-                        # Apply reasonable bounds
-                        estimated_quantity = max(20, min(120, estimated_quantity))  # Between 20g and 120g
-                        
-                        protein_supplement['quantity_needed'] = round(estimated_quantity, 1)
-                        
-                        supplements.append(protein_supplement)
-                        added_ingredients.add(protein_supplement['name'])
-                        added_categories.add(protein_supplement.get('category', 'protein'))
-                        
-                        # Calculate actual protein added
-                        protein_added = (supplement_protein * estimated_quantity) / 100
-                        remaining_protein_deficit -= protein_added
-                        
-                        logger.info(f"✅ Added protein supplement {attempt+1}: {protein_supplement['name']} ({protein_added:.1f}g protein, {estimated_quantity:.1f}g quantity, remaining deficit: {remaining_protein_deficit:.1f}g)")
-                    else:
-                        logger.warning(f"⚠️ Protein supplement has no protein content: {protein_supplement['name']}")
-                        break
+                    # Apply reasonable bounds (20g - 200g)
+                    exact_quantity = max(20, min(200, exact_quantity))
+                    
+                    protein_supplement['quantity_needed'] = round(exact_quantity, 1)
+                    
+                    supplements.append(protein_supplement)
+                    added_ingredients.add(protein_supplement['name'])
+                    added_categories.add(protein_supplement.get('category', 'protein'))
+                    
+                    # Calculate actual protein added
+                    protein_added = (supplement_protein * exact_quantity) / 100
+                    logger.info(f"✅ PRECISE Protein: {protein_supplement['name']} ({protein_added:.1f}g protein, {exact_quantity:.1f}g quantity)")
+                    
+                    # Update deficits for next phase
+                    deficits['protein'] = max(0, deficits['protein'] - protein_added)
+                    deficits['calories'] = max(0, deficits['calories'] - (protein_supplement.get('calories_per_100g', 0) * exact_quantity / 100))
                 else:
-                    logger.warning(f"⚠️ No suitable protein supplement found for attempt {attempt+1}")
-                    break
+                    logger.warning(f"⚠️ Protein supplement has no protein content: {protein_supplement['name']}")
+            else:
+                logger.warning(f"⚠️ No suitable protein supplement found")
         else:
-            logger.info(f"✅ Protein target met or close enough (deficit: {deficits['protein']:.1f}g)")
+            logger.info(f"✅ Protein target met (deficit: {deficits['protein']:.1f}g)")
         
-        # Check if we already have sufficient carb sources
-        existing_carb_sources = meal_analysis['carb_sources']
-        total_existing_carbs = sum(ing.get('carbs_per_100g', 0) * ing.get('quantity_needed', 100) / 100 for ing in existing_carb_sources)
-        # If quantity_needed is 0, use actual quantity from RAG ingredients
-        if total_existing_carbs == 0:
-            total_existing_carbs = sum(ing.get('carbs_per_100g', 0) * ing.get('quantity', 100) / 100 for ing in existing_carb_sources)
-        
-        # CONSERVATIVE: Only add carbs if we have a significant deficit AND don't have enough carb sources
-        if deficits['carbs'] > 15 and total_existing_carbs < 15:  # Much more conservative carb addition
-            logger.info(f"🔍 Adding carb supplement: deficit={deficits['carbs']:.1f}g, existing={total_existing_carbs:.1f}g")
-            carb_supplement = self._find_meal_appropriate_carb(
+        # PHASE 2: PRECISE CARB SUPPLEMENTATION
+        if deficits['carbs'] > 5:  # Any significant carb deficit
+            logger.info(f"🎯 PRECISE Carb supplementation: deficit={deficits['carbs']:.1f}g")
+            
+            carb_supplement = self._find_optimal_carb_supplement(
                 deficits['carbs'], meal_analysis, added_ingredients, added_categories
             )
+            
             if carb_supplement:
-                supplements.append(carb_supplement)
-                added_ingredients.add(carb_supplement['name'])
-                added_categories.add(carb_supplement.get('category', 'carb'))
-                logger.info(f"✅ Added carb supplement: {carb_supplement['name']}")
+                # PRECISE QUANTITY CALCULATION
+                supplement_carbs = carb_supplement.get('carbs_per_100g', 0)
+                if supplement_carbs > 0:
+                    exact_quantity = (deficits['carbs'] / supplement_carbs) * 100
+                    exact_quantity = max(20, min(200, exact_quantity))
+                    
+                    carb_supplement['quantity_needed'] = round(exact_quantity, 1)
+                    
+                    supplements.append(carb_supplement)
+                    added_ingredients.add(carb_supplement['name'])
+                    added_categories.add(carb_supplement.get('category', 'carb'))
+                    
+                    carbs_added = (supplement_carbs * exact_quantity) / 100
+                    logger.info(f"✅ PRECISE Carbs: {carb_supplement['name']} ({carbs_added:.1f}g carbs, {exact_quantity:.1f}g quantity)")
+                    
+                    # Update deficits
+                    deficits['carbs'] = max(0, deficits['carbs'] - carbs_added)
+                    deficits['calories'] = max(0, deficits['calories'] - (carb_supplement.get('calories_per_100g', 0) * exact_quantity / 100))
+                else:
+                    logger.warning(f"⚠️ Carb supplement has no carb content: {carb_supplement['name']}")
             else:
-                logger.warning(f"⚠️ No suitable carb supplement found for deficit: {deficits['carbs']:.1f}g")
-        elif deficits['carbs'] > 8:
-            logger.info(f"⚠️ Carb deficit exists ({deficits['carbs']:.1f}g) but sufficient carb sources already present ({total_existing_carbs:.1f}g)")
+                logger.warning(f"⚠️ No suitable carb supplement found")
         else:
-            logger.info(f"✅ Carb target met or close enough (deficit: {deficits['carbs']:.1f}g)")
+            logger.info(f"✅ Carb target met (deficit: {deficits['carbs']:.1f}g)")
         
-        # Check if we already have sufficient fat sources
-        existing_fat_sources = meal_analysis['fat_sources']
-        total_existing_fat = sum(ing.get('fat_per_100g', 0) * ing.get('quantity_needed', 100) / 100 for ing in existing_fat_sources)
-        # If quantity_needed is 0, use actual quantity from RAG ingredients
-        if total_existing_fat == 0:
-            total_existing_fat = sum(ing.get('fat_per_100g', 0) * ing.get('quantity', 100) / 100 for ing in existing_fat_sources)
-        
-        # ULTRA CONSERVATIVE: Only add fat if we have a significant deficit AND don't have enough fat sources
-        if deficits['fat'] > 10 and total_existing_fat < 3:  # Ultra conservative fat addition
-            logger.info(f"🔍 Adding fat supplement: deficit={deficits['fat']:.1f}g, existing={total_existing_fat:.1f}g")
-            fat_supplement = self._find_meal_appropriate_fat(
+        # PHASE 3: PRECISE FAT SUPPLEMENTATION
+        if deficits['fat'] > 2:  # Any significant fat deficit
+            logger.info(f"🎯 PRECISE Fat supplementation: deficit={deficits['fat']:.1f}g")
+            
+            fat_supplement = self._find_optimal_fat_supplement(
                 deficits['fat'], meal_analysis, added_ingredients, added_categories
             )
+            
             if fat_supplement:
-                # Check if this fat source is low-calorie and won't overshoot
-                if fat_supplement.get('calories_per_100g', 0) < 150:  # Only very low-calorie fats
+                supplement_fat = fat_supplement.get('fat_per_100g', 0)
+                if supplement_fat > 0:
+                    exact_quantity = (deficits['fat'] / supplement_fat) * 100
+                    exact_quantity = max(10, min(150, exact_quantity))  # Fat needs smaller quantities
+                    
+                    fat_supplement['quantity_needed'] = round(exact_quantity, 1)
+                    
                     supplements.append(fat_supplement)
                     added_ingredients.add(fat_supplement['name'])
                     added_categories.add(fat_supplement.get('category', 'fat'))
-                    logger.info(f"✅ Added low-calorie fat supplement: {fat_supplement['name']}")
-                else:
-                    logger.info(f"⚠️ Skipping {fat_supplement['name']} - too high calorie for fat supplement")
-            else:
-                logger.warning(f"⚠️ No suitable fat supplement found for deficit: {deficits['fat']:.1f}g")
-        elif deficits['fat'] > 5:
-            logger.info(f"⚠️ Fat deficit exists ({deficits['fat']:.1f}g) but sufficient fat sources already present ({total_existing_fat:.1f}g)")
-        else:
-            logger.info(f"✅ Fat target met or close enough (deficit: {deficits['fat']:.1f}g)")
-        
-        # Add vegetables only if appropriate for the meal type and we have room
-        if meal_type.lower() in ['lunch', 'dinner'] and len(supplements) < 1:  # Limit to 1 supplement
-            veg_supplement = self._find_meal_appropriate_vegetable(
-                meal_analysis, added_ingredients, added_categories
-            )
-            if veg_supplement:
-                supplements.append(veg_supplement)
-                added_ingredients.add(veg_supplement['name'])
-                added_categories.add(veg_supplement.get('category', 'vegetable'))
-        
-        # Add fruits for breakfast and snacks
-        if meal_type.lower() in ['breakfast', 'morning_snack', 'afternoon_snack', 'evening_snack'] and len(supplements) < 1:  # Limit to 1 supplement
-            fruit_supplement = self._find_meal_appropriate_fruit(
-                meal_analysis, added_ingredients, added_categories
-            )
-            if fruit_supplement:
-                supplements.append(fruit_supplement)
-                added_ingredients.add(fruit_supplement['name'])
-                added_categories.add(fruit_supplement.get('category', 'fruit'))
-        
-        logger.info(f"✅ Added {len(supplements)} supplementary ingredients: {[s['name'] for s in supplements]}")
-        return supplements
-    
-    def _find_meal_appropriate_protein(self, protein_deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
-        """Find meal-appropriate protein source avoiding conflicts"""
-        meal_type = meal_analysis['meal_type'].lower()
-        meal_pref = meal_analysis['meal_preferences']
-        existing_proteins = meal_analysis['existing_proteins']
-        
-        # Get priority proteins for this meal type
-        priority_proteins = meal_pref['protein_priority']
-        
-        # Filter out ingredients that conflict with existing ones
-        available_proteins = []
-        for protein_name in priority_proteins:
-            if protein_name not in added_ingredients:
-                # Check if this protein type conflicts with existing ones
-                protein_type = self._get_protein_type(protein_name)
-                if protein_type not in existing_proteins:
-                    ingredient = self._find_ingredient_by_name(protein_name)
-                    if ingredient and ingredient.get('protein_per_100g', 0) > 7:  # Lower threshold to include legumes
-                        # ULTRA PRIORITY: Beans and legumes for better macro balance (low fat, high protein)
-                        if any(legume in protein_name.lower() for legume in ['beans', 'lentils', 'chickpeas', 'edamame', 'tofu', 'tempeh']):
-                            # Always prioritize legumes over other proteins
-                            # Check if it's low-fat (better for macro balance)
-                            if ingredient.get('fat_per_100g', 0) < 5:
-                                available_proteins.insert(0, ingredient)  # Ultra priority
-                                logger.info(f"✅ Prioritizing low-fat legume: {protein_name} (fat: {ingredient.get('fat_per_100g', 0)}g)")
-                            else:
-                                available_proteins.insert(1, ingredient)  # High priority
-                                logger.info(f"✅ Prioritizing legume: {protein_name} (fat: {ingredient.get('fat_per_100g', 0)}g)")
-                        # AVOID: Don't add any meat if we already have meat
-                        elif any(meat_type in protein_type for meat_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb']):
-                            if not any(existing_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb'] for existing_type in existing_proteins):
-                                available_proteins.append(ingredient)  # Only add if no meat exists
-                            else:
-                                logger.info(f"⚠️ Skipping {protein_name} - meat conflict detected (existing: {existing_proteins})")
-                        else:
-                            available_proteins.append(ingredient)
-        
-        # If no priority proteins available, find alternatives
-        if not available_proteins:
-            for ingredient in self.ingredients_db:
-                if (ingredient.get('protein_per_100g', 0) > 7 and  # Lower threshold to include legumes 
-                    ingredient.get('name', '').lower() not in added_ingredients):
-                    protein_type = self._get_protein_type(ingredient.get('name', ''))
-                    if protein_type not in existing_proteins:
-                        # Additional check: avoid adding heavy proteins to light meals
-                        if meal_type in ['breakfast', 'morning_snack', 'afternoon_snack', 'evening_snack']:
-                            # For light meals, prefer lighter proteins and easy-to-eat options
-                            if ingredient.get('calories_per_100g', 0) < 250:  # Slightly higher calorie limit for light meals
-                                # Prioritize easy-to-eat proteins for snacks
-                                protein_name = ingredient.get('name', '').lower()
-                                if any(easy_protein in protein_name for easy_protein in ['yogurt', 'cheese', 'nuts', 'seeds', 'hummus', 'cottage', 'protein_powder', 'protein_bar', 'edamame']):
-                                    available_proteins.insert(0, ingredient)  # Add to front for priority
-                                else:
-                                    available_proteins.append(ingredient)
-                        else:
-                            # For main meals, prefer balanced proteins (not too high calorie)
-                            # ULTRA PRIORITY: Beans and legumes for better macro balance (low fat, high protein)
-                            protein_name = ingredient.get('name', '').lower()
-                            if any(legume in protein_name for legume in ['beans', 'lentils', 'chickpeas', 'edamame', 'tofu', 'tempeh']):
-                                # Check if it's low-fat (better for macro balance)
-                                if ingredient.get('fat_per_100g', 0) < 5:
-                                    available_proteins.insert(0, ingredient)  # Ultra priority
-                                    logger.info(f"✅ Alternative low-fat legume: {ingredient.get('name', '')} (fat: {ingredient.get('fat_per_100g', 0)}g)")
-                                else:
-                                    available_proteins.insert(1, ingredient)  # High priority
-                                    logger.info(f"✅ Alternative legume: {ingredient.get('name', '')} (fat: {ingredient.get('fat_per_100g', 0)}g)")
-                            # AVOID: Don't add any meat if we already have meat
-                            elif any(meat_type in protein_type for meat_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb']):
-                                if not any(existing_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb'] for existing_type in existing_proteins):
-                                    if ingredient.get('calories_per_100g', 0) < 200:  # Moderate calorie proteins
-                                        available_proteins.insert(2, ingredient)  # Add to third priority
-                                    else:
-                                        available_proteins.append(ingredient)
-                                else:
-                                    logger.info(f"⚠️ Skipping {ingredient.get('name', '')} - meat conflict detected (existing: {existing_proteins})")
-                            elif ingredient.get('calories_per_100g', 0) < 200:  # Moderate calorie proteins
-                                available_proteins.insert(2, ingredient)  # Add to third priority
-                            else:
-                                available_proteins.append(ingredient)
-        
-        if available_proteins:
-            # SMART SELECTION: Choose based on multiple criteria
-            # 1. First priority: Low-fat legumes (best for macro balance)
-            low_fat_legumes = [p for p in available_proteins if 
-                              any(legume in p.get('name', '').lower() for legume in ['beans', 'lentils', 'chickpeas', 'edamame', 'tofu', 'tempeh']) and
-                              p.get('fat_per_100g', 0) < 5]
-            
-            if low_fat_legumes:
-                # Choose the one with highest protein content among low-fat legumes
-                best_protein = max(low_fat_legumes, key=lambda x: x.get('protein_per_100g', 0))
-                logger.info(f"🏆 Selected low-fat legume: {best_protein.get('name', '')} (protein: {best_protein.get('protein_per_100g', 0)}g, fat: {best_protein.get('fat_per_100g', 0)}g)")
-                return best_protein
-            
-            # 2. Second priority: Other legumes
-            other_legumes = [p for p in available_proteins if 
-                            any(legume in p.get('name', '').lower() for legume in ['beans', 'lentils', 'chickpeas', 'edamame', 'tofu', 'tempeh'])]
-            
-            if other_legumes:
-                best_protein = max(other_legumes, key=lambda x: x.get('protein_per_100g', 0))
-                logger.info(f"🥈 Selected legume: {best_protein.get('name', '')} (protein: {best_protein.get('protein_per_100g', 0)}g, fat: {best_protein.get('fat_per_100g', 0)}g)")
-                return best_protein
-            
-            # 3. Third priority: Other proteins (non-meat)
-            other_proteins = [p for p in available_proteins if 
-                             not any(meat_type in self._get_protein_type(p.get('name', '')) for meat_type in ['red_meat', 'poultry', 'fish', 'pork', 'lamb'])]
-            
-            if other_proteins:
-                best_protein = max(other_proteins, key=lambda x: x.get('protein_per_100g', 0))
-                logger.info(f"🥉 Selected other protein: {best_protein.get('name', '')} (protein: {best_protein.get('protein_per_100g', 0)}g)")
-                return best_protein
-            
-            # 4. Last resort: Any available protein
-            best_protein = max(available_proteins, key=lambda x: x.get('protein_per_100g', 0))
-            logger.info(f"🔴 Selected fallback protein: {best_protein.get('name', '')} (protein: {best_protein.get('protein_per_100g', 0)}g)")
-            return best_protein
-        
-        return None
-    
-    def _find_meal_appropriate_carb(self, carb_deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
-        """Find meal-appropriate carb source avoiding conflicts"""
-        meal_type = meal_analysis['meal_type'].lower()
-        meal_pref = meal_analysis['meal_preferences']
-        existing_carbs = meal_analysis['existing_carbs']
-        
-        # Get priority carbs for this meal type
-        priority_carbs = meal_pref['carb_priority']
-        
-        # Filter out ingredients that conflict with existing ones
-        available_carbs = []
-        for carb_name in priority_carbs:
-            if carb_name not in added_ingredients:
-                # Check if this carb type conflicts with existing ones
-                carb_type = self._get_carb_type(carb_name)
-                if carb_type not in existing_carbs:
-                    ingredient = self._find_ingredient_by_name(carb_name)
-                    if ingredient and ingredient.get('carbs_per_100g', 0) > 20:
-                        available_carbs.append(ingredient)
-        
-        # If no priority carbs available, find alternatives
-        if not available_carbs:
-            for ingredient in self.ingredients_db:
-                if (ingredient.get('carbs_per_100g', 0) > 20 and 
-                    ingredient.get('name', '').lower() not in added_ingredients):
-                    carb_type = self._get_carb_type(ingredient.get('name', ''))
-                    if carb_type not in existing_carbs:
-                        # Additional check: avoid adding heavy carbs to light meals
-                        if meal_type in ['breakfast', 'morning_snack', 'afternoon_snack', 'evening_snack']:
-                            # For light meals, prefer lighter carbs
-                            if ingredient.get('calories_per_100g', 0) < 300:  # Lower calorie carbs
-                                available_carbs.append(ingredient)
-                        else:
-                            # For main meals, prefer balanced carbs (not too high)
-                            # Avoid extremely high carb ingredients that might overshoot
-                            if ingredient.get('carbs_per_100g', 0) < 60:  # Moderate carb content
-                                available_carbs.insert(0, ingredient)  # Add to front for priority
-                            else:
-                                available_carbs.append(ingredient)
-        
-        if available_carbs:
-            # Choose the one with highest carb content
-            best_carb = max(available_carbs, key=lambda x: x.get('carbs_per_100g', 0))
-            return best_carb
-        
-        return None
-    
-    def _find_meal_appropriate_fat(self, fat_deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
-        """Find meal-appropriate fat source avoiding conflicts"""
-        meal_type = meal_analysis['meal_type'].lower()
-        meal_pref = meal_analysis['meal_preferences']
-        existing_fats = meal_analysis['existing_fats']
-        
-        # Get priority fats for this meal type
-        priority_fats = meal_pref['fat_priority']
-        
-        # Filter out ingredients that conflict with existing ones
-        available_fats = []
-        for fat_name in priority_fats:
-            if fat_name not in added_ingredients:
-                # Check if this fat type conflicts with existing ones
-                fat_type = self._get_fat_type(fat_name)
-                if fat_type not in existing_fats:
-                    ingredient = self._find_ingredient_by_name(fat_name)
-                    if ingredient and ingredient.get('fat_per_100g', 0) > 10:
-                        available_fats.append(ingredient)
-        
-        # If no priority fats available, find alternatives
-        if not available_fats:
-            for ingredient in self.ingredients_db:
-                if (ingredient.get('fat_per_100g', 0) > 10 and 
-                    ingredient.get('name', '').lower() not in added_ingredients):
-                    fat_type = self._get_fat_type(ingredient.get('name', ''))
-                    if fat_type not in existing_fats:
-                        # Additional check: avoid adding heavy fats to light meals
-                        if meal_type in ['breakfast', 'morning_snack', 'afternoon_snack', 'evening_snack']:
-                            # For light meals, prefer lighter fats
-                            if ingredient.get('calories_per_100g', 0) < 400:  # Lower calorie fats
-                                available_fats.append(ingredient)
-                        else:
-                            # For main meals, any fat is fine
-                            available_fats.append(ingredient)
-        
-        if available_fats:
-            # Choose the one with moderate fat content (not too high)
-            best_fat = min(available_fats, key=lambda x: x.get('fat_per_100g', 0))
-            return best_fat
-        
-        return None
-    
-    def _find_meal_appropriate_vegetable(self, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
-        """Find meal-appropriate vegetable avoiding conflicts"""
-        meal_type = meal_analysis['meal_type'].lower()
-        meal_pref = meal_analysis['meal_preferences']
-        existing_vegetables = meal_analysis['existing_vegetables']
-        
-        # Get priority vegetables for this meal type
-        priority_vegetables = meal_pref['vegetable_priority']
-        
-        # Filter out vegetables that conflict with existing ones
-        available_vegetables = []
-        for veg_name in priority_vegetables:
-            if veg_name not in added_ingredients:
-                # Check if this vegetable type conflicts with existing ones
-                veg_type = self._get_vegetable_type(veg_name)
-                if veg_type not in existing_vegetables:
-                    ingredient = self._find_ingredient_by_name(veg_name)
-                    if ingredient and ingredient.get('calories_per_100g', 0) < 50:  # Low calorie vegetables
-                        available_vegetables.append(ingredient)
-        
-        # If no priority vegetables available, find alternatives
-        if not available_vegetables:
-            for ingredient in self.ingredients_db:
-                if (ingredient.get('calories_per_100g', 0) < 50 and 
-                    ingredient.get('name', '').lower() not in added_ingredients):
-                    veg_type = self._get_vegetable_type(ingredient.get('name', ''))
-                    if veg_type not in existing_vegetables:
-                        available_vegetables.append(ingredient)
-        
-        if available_vegetables:
-            # Choose the one with lowest calories
-            best_vegetable = min(available_vegetables, key=lambda x: x.get('calories_per_100g', 0))
-            return best_vegetable
-        
-        return None
-    
-    def _find_meal_appropriate_fruit(self, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
-        """Find meal-appropriate fruit for breakfast and snacks"""
-        meal_type = meal_analysis['meal_type'].lower()
-        existing_fruits = meal_analysis.get('existing_fruits', set())
-        
-        # Define appropriate fruits for different meal types
-        fruit_preferences = {
-            'breakfast': ['apple', 'banana', 'orange', 'berries', 'grapes'],
-            'morning_snack': ['apple', 'banana', 'orange', 'pear'],
-            'afternoon_snack': ['apple', 'banana', 'orange', 'grapes', 'kiwi'],
-            'evening_snack': ['apple', 'banana', 'orange', 'pear']
-        }
-        
-        priority_fruits = fruit_preferences.get(meal_type, ['apple', 'banana', 'orange'])
-        
-        # Filter out ingredients that conflict with existing ones
-        available_fruits = []
-        for fruit_name in priority_fruits:
-            if fruit_name not in added_ingredients:
-                ingredient = self._find_ingredient_by_name(fruit_name)
-                if ingredient and ingredient.get('category') == 'fruit':
-                    available_fruits.append(ingredient)
-        
-        # If no priority fruits available, find alternatives
-        if not available_fruits:
-            for ingredient in self.ingredients_db:
-                if (ingredient.get('category') == 'fruit' and 
-                    ingredient.get('name', '').lower() not in added_ingredients):
-                    available_fruits.append(ingredient)
-        
-        if available_fruits:
-            # Choose a random one for variety
-            return random.choice(available_fruits)
-        
-        return None
-    
-    def _smart_minimal_supplementation(self, deficits: Dict, rag_ingredients: List[Dict], added_ingredients: set, added_categories: set, current_totals: Dict, meal_analysis: Dict, user_preferences: Dict) -> List[Dict]:
-        """Smart supplementation with minimal ingredients"""
-        supplements = []
-        
-        # Sort deficits by priority (protein first, then carbs, then fat)
-        deficit_priority = [
-            ('protein', deficits.get('protein', 0)),
-            ('carbs', deficits.get('carbs', 0)),
-            ('fat', deficits.get('fat', 0))
-        ]
-        deficit_priority.sort(key=lambda x: abs(x[1]), reverse=True)
-        
-        # Try to meet each deficit with the most efficient single ingredient
-        for macro_type, deficit in deficit_priority:
-            if abs(deficit) > 0.1:  # Only add if significant deficit
-                best_ingredient = self._find_best_single_ingredient_for_macro(macro_type, deficit, added_ingredients, added_categories, meal_analysis, user_preferences)
-                
-                if best_ingredient:
-                    # Calculate optimal quantity to meet this specific deficit
-                    optimal_qty = self._calculate_optimal_quantity_for_deficit(best_ingredient, macro_type, deficit)
                     
-                    if optimal_qty > 0:
-                        best_ingredient['quantity_needed'] = optimal_qty
-                        supplements.append(best_ingredient)
-                        
-                        # Update tracking
-                        added_ingredients.add(best_ingredient.get('name', ''))
-                        added_categories.add(best_ingredient.get('category', ''))
-                        
-                        # Recalculate totals
-                        current_totals = self._update_totals_with_supplements(current_totals, [best_ingredient])
-                        
-                        # Check if we've met this target
-                        if abs(deficit) <= 0.5:
-                            break
+                    fat_added = (supplement_fat * exact_quantity) / 100
+                    logger.info(f"✅ PRECISE Fat: {fat_supplement['name']} ({fat_added:.1f}g fat, {exact_quantity:.1f}g quantity)")
+                    
+                    # Update deficits
+                    deficits['fat'] = max(0, deficits['fat'] - fat_added)
+                    deficits['calories'] = max(0, deficits['calories'] - (fat_supplement.get('calories_per_100g', 0) * exact_quantity / 100))
+                else:
+                    logger.warning(f"⚠️ Fat supplement has no fat content: {fat_supplement['name']}")
+            else:
+                logger.warning(f"⚠️ No suitable fat supplement found")
+        else:
+            logger.info(f"✅ Fat target met (deficit: {deficits['fat']:.1f}g)")
+        
+        # PHASE 4: PRECISE CALORIE BALANCING (if still needed)
+        if deficits['calories'] > 20:  # Any significant calorie deficit
+            logger.info(f"🎯 PRECISE Calorie balancing: deficit={deficits['calories']:.1f}cal")
+            
+            calorie_supplement = self._find_optimal_calorie_supplement(
+                deficits['calories'], meal_analysis, added_ingredients, added_categories
+            )
+            
+            if calorie_supplement:
+                supplement_calories = calorie_supplement.get('calories_per_100g', 0)
+                if supplement_calories > 0:
+                    exact_quantity = (deficits['calories'] / supplement_calories) * 100
+                    exact_quantity = max(20, min(200, exact_quantity))
+                    
+                    calorie_supplement['quantity_needed'] = round(exact_quantity, 1)
+                    
+                    supplements.append(calorie_supplement)
+                    added_ingredients.add(calorie_supplement['name'])
+                    added_categories.add(calorie_supplement.get('category', 'other'))
+                    
+                    calories_added = (supplement_calories * exact_quantity) / 100
+                    logger.info(f"✅ PRECISE Calories: {calorie_supplement['name']} ({calories_added:.1f} cal, {exact_quantity:.1f}g quantity)")
+                else:
+                    logger.warning(f"⚠️ Calorie supplement has no calorie content: {calorie_supplement['name']}")
+            else:
+                logger.warning(f"⚠️ No suitable calorie supplement found")
+        else:
+            logger.info(f"✅ Calorie target met (deficit: {deficits['calories']:.1f}cal)")
+        
+        # PHASE 5: MICRONUTRIENT ENHANCEMENT (only if we have room and it's appropriate)
+        if (len(supplements) < 3 and  # Don't add too many supplements
+            meal_type.lower() in ['lunch', 'dinner'] and
+            deficits.get('calories', 0) > 30):
+            
+            micronutrient_supplement = self._find_micronutrient_supplement(
+                meal_analysis, added_ingredients, added_categories
+            )
+            
+            if micronutrient_supplement:
+                # Add small amount for micronutrients
+                micronutrient_supplement['quantity_needed'] = 50  # Standard 50g for micronutrients
+                
+                supplements.append(micronutrient_supplement)
+                added_ingredients.add(micronutrient_supplement['name'])
+                added_categories.add(micronutrient_supplement.get('category', 'vegetable'))
+                
+                logger.info(f"✅ Micronutrients: {micronutrient_supplement['name']} (50g for vitamins/minerals)")
+        
+        logger.info(f"✅ PRECISE supplementation complete: {len(supplements)} ingredients added")
+        logger.info(f"📊 Final deficits: protein={deficits['protein']:.1f}g, carbs={deficits['carbs']:.1f}g, fat={deficits['fat']:.1f}g, calories={deficits['calories']:.1f}cal")
         
         return supplements
+    
+    def _find_optimal_protein_supplement(self, deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find the best protein supplement for the given deficit"""
+        best_supplement = None
+        best_score = float('inf')
+        
+        for ingredient in self.ingredients_db:
+            if ingredient.get('protein_per_100g', 0) > 0 and ingredient.get('name', '').lower() not in added_ingredients:
+                score = self._calculate_ingredient_efficiency_score(ingredient, 'protein', deficit, meal_analysis)
+                if score < best_score:
+                    best_score = score
+                    best_supplement = ingredient
+        
+        return best_supplement
+    
+    def _find_optimal_carb_supplement(self, deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find the best carb supplement for the given deficit"""
+        best_supplement = None
+        best_score = float('inf')
+        
+        for ingredient in self.ingredients_db:
+            if ingredient.get('carbs_per_100g', 0) > 0 and ingredient.get('name', '').lower() not in added_ingredients:
+                score = self._calculate_ingredient_efficiency_score(ingredient, 'carbs', deficit, meal_analysis)
+                if score < best_score:
+                    best_score = score
+                    best_supplement = ingredient
+        
+        return best_supplement
+    
+    def _find_optimal_fat_supplement(self, deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find the best fat supplement for the given deficit"""
+        best_supplement = None
+        best_score = float('inf')
+        
+        for ingredient in self.ingredients_db:
+            if ingredient.get('fat_per_100g', 0) > 0 and ingredient.get('name', '').lower() not in added_ingredients:
+                score = self._calculate_ingredient_efficiency_score(ingredient, 'fat', deficit, meal_analysis)
+                if score < best_score:
+                    best_score = score
+                    best_supplement = ingredient
+        
+        return best_supplement
+    
+    def _find_optimal_calorie_supplement(self, deficit: float, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find the best calorie supplement for the given deficit"""
+        best_supplement = None
+        best_score = float('inf')
+        
+        for ingredient in self.ingredients_db:
+            if ingredient.get('calories_per_100g', 0) > 0 and ingredient.get('name', '').lower() not in added_ingredients:
+                score = self._calculate_ingredient_efficiency_score(ingredient, 'calories', deficit, meal_analysis)
+                if score < best_score:
+                    best_score = score
+                    best_supplement = ingredient
+        
+        return best_supplement
+    
+    def _find_micronutrient_supplement(self, meal_analysis: Dict, added_ingredients: set, added_categories: set) -> Optional[Dict]:
+        """Find a supplement for micronutrients"""
+        best_supplement = None
+        best_score = float('inf')
+        
+        for ingredient in self.ingredients_db:
+            if ingredient.get('name', '').lower() not in added_ingredients:
+                score = self._calculate_ingredient_efficiency_score(ingredient, 'micronutrients', 0, meal_analysis)
+                if score < best_score:
+                    best_score = score
+                    best_supplement = ingredient
+        
+        return best_supplement
+    
+    def _calculate_ingredient_efficiency_score(self, ingredient: Dict, macro_type: str, deficit: float, meal_analysis: Dict) -> float:
+        """Calculate efficiency score for an ingredient"""
+        score = 0
+        
+        if macro_type == 'protein':
+            protein_content = ingredient.get('protein_per_100g', 0)
+            fat_content = ingredient.get('fat_per_100g', 0)
+            calories_content = ingredient.get('calories_per_100g', 0)
+            
+            # Higher protein, lower fat, lower calories = better score
+            if protein_content > 0:
+                score = protein_content / max(fat_content + calories_content/10, 1)
+                
+        elif macro_type == 'carbs':
+            carbs_content = ingredient.get('carbs_per_100g', 0)
+            fat_content = ingredient.get('fat_per_100g', 0)
+            calories_content = ingredient.get('calories_per_100g', 0)
+            
+            # Higher carbs, lower fat, lower calories = better score
+            if carbs_content > 0:
+                score = carbs_content / max(fat_content + calories_content/15, 1)
+                
+        elif macro_type == 'fat':
+            fat_content = ingredient.get('fat_per_100g', 0)
+            calories_content = ingredient.get('calories_per_100g', 0)
+            
+            # Moderate fat content, lower calories = better score
+            if 5 <= fat_content <= 15 and calories_content > 0:
+                score = fat_content / calories_content
+        
+        return score
     
     def _find_best_single_ingredient_for_macro(self, macro_type: str, deficit: float, added_ingredients: set, added_categories: set, meal_analysis: Dict, user_preferences: Dict) -> Optional[Dict]:
         """Find the single best ingredient for a specific macro deficit with smart avoidance"""

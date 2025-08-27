@@ -1,0 +1,46 @@
+{
+  "ingredients": [
+    {
+      "name": "Ground Beef",
+      "protein_per_100g": 26.0,
+      "carbs_per_100g": 0,
+      "fat_per_100g": 15.0,
+      "calories_per_100g": 250,
+      "max_quantity": 300,
+      "category": "protein"
+    },
+    {
+      "name": "Onion",
+      "protein_per_100g": 1.1,
+      "carbs_per_100g": 9.0,
+      "fat_per_100g": 0.1,
+      "calories_per_100g": 40,
+      "max_quantity": 300,
+      "category": "vegetable"
+    },
+    {
+      "name": "Grilled Tomato",
+      "protein_per_100g": 1.0,
+      "carbs_per_100g": 5.0,
+      "fat_per_100g": 0,
+      "calories_per_100g": 25,
+      "max_quantity": 300,
+      "category": "vegetable"
+    },
+    {
+      "name": "Pita Bread",
+      "protein_per_100g": 13.0,
+      "carbs_per_100g": 41.0,
+      "fat_per_100g": 4.2,
+      "calories_per_100g": 247,
+      "max_quantity": 300,
+      "category": "grain"
+    }
+  ],
+  "target_macros": {
+    "calories": 637.2,
+    "protein": 45.4,
+    "carbs": 88.5,
+    "fat": 13.7
+  }
+}

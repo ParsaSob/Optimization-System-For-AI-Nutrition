@@ -33,6 +33,8 @@ def root():
             "optimize_single_meal": "/optimize-single-meal",
             "optimize_single_meal_rag": "/optimize-single-meal-rag",
             "optimize_single_meal_rag_advanced": "/optimize-single-meal-rag-advanced",
+            "test_scipy_optimization": "/test-scipy-optimization",
+            "test_scipy_with_helpers": "/test-scipy-with-helpers",
             "ingredients": "/api/ingredients",
             "rag_ingredients": "/api/rag-ingredients"
         },
@@ -431,7 +433,7 @@ def optimize_single_meal_rag():
 
 @app.route('/optimize-single-meal-rag-advanced', methods=['POST'])
 def optimize_single_meal_rag_advanced():
-    """Advanced RAG-based single meal optimization endpoint"""
+    """Advanced RAG-based single meal optimization endpoint with automatic helper ingredients"""
     try:
         request_data = request.get_json()
         
@@ -450,8 +452,12 @@ def optimize_single_meal_rag_advanced():
         user_preferences = request_data['user_preferences']
         meal_type = request_data['meal_type']
         
-        # Run advanced RAG meal optimization
-        result = rag_meal_optimizer.optimize_single_meal(
+        print(f"🚀 Starting optimization for {meal_type} meal...")
+        print(f"🎯 Target macros: {target_macros}")
+        
+        # Step 1: Run initial optimization with 4 methods
+        print("\n📊 Step 1: Running initial optimization with 4 methods...")
+        initial_result = rag_meal_optimizer.optimize_single_meal(
             rag_response=rag_response,
             target_macros=target_macros,
             user_preferences=user_preferences,
@@ -459,13 +465,488 @@ def optimize_single_meal_rag_advanced():
             request_data=request_data
         )
         
-        return jsonify(result)
+        # Check if targets are achieved
+        target_achievement = check_target_achievement_advanced(initial_result, target_macros)
+        print(f"📈 Initial optimization target achievement: {target_achievement}")
+        
+        # If targets are not achieved, add helper ingredients and re-optimize
+        if not target_achievement['overall']:
+            print(f"\n🔧 Step 2: Targets not fully achieved. Adding helper ingredients...")
+            
+            # Get current ingredients from initial result
+            current_ingredients = get_current_ingredients_from_result(initial_result)
+            
+            # Add helper ingredients based on deficits
+            helper_ingredients = add_smart_helper_ingredients(current_ingredients, target_macros, meal_type)
+            
+            if helper_ingredients:
+                print(f"➕ Added {len(helper_ingredients)} helper ingredients:")
+                for helper in helper_ingredients:
+                    print(f"  • {helper['name']}: {helper['protein_per_100g']}g protein, {helper['carbs_per_100g']}g carbs, {helper['fat_per_100g']}g fat")
+                
+                # Combine original and helper ingredients
+                all_ingredients = current_ingredients + helper_ingredients
+                
+                # Step 3: Re-optimize with all ingredients
+                print(f"\n🔄 Step 3: Re-optimizing with helper ingredients...")
+                final_result = rag_meal_optimizer._differential_evolution_optimize(
+                    all_ingredients, 
+                    target_macros
+                )
+                
+                # Calculate final nutrition and achievement
+                if final_result.get('success') and final_result.get('quantities'):
+                    final_nutrition = calculate_final_nutrition_with_helpers(all_ingredients, final_result['quantities'])
+                    final_result['final_nutrition'] = final_nutrition
+                    final_result['target_achievement'] = check_target_achievement(final_nutrition, target_macros)
+                    
+                    # Update the result
+                    initial_result['optimization_result'] = final_result
+                    initial_result['helper_ingredients_added'] = helper_ingredients
+                    initial_result['final_nutrition'] = final_nutrition
+                    initial_result['target_achievement'] = final_result['target_achievement']
+                    initial_result['optimization_steps'] = {
+                        'step1_initial': 'Completed with 4 methods',
+                        'step2_helpers': f'Added {len(helper_ingredients)} helper ingredients',
+                        'step3_reoptimization': 'Completed with SciPy differential evolution'
+                    }
+                    
+                    print(f"✅ Final optimization completed with helpers!")
+                    print(f"📊 Final nutrition: {final_nutrition}")
+                    print(f"🎯 Final target achievement: {final_result['target_achievement']}")
+                else:
+                    print(f"❌ Re-optimization failed: {final_result.get('error', 'Unknown error')}")
+            else:
+                print(f"ℹ️ No helper ingredients needed or available")
+        else:
+            print(f"✅ All targets achieved in initial optimization!")
+            initial_result['optimization_steps'] = {
+                'step1_initial': 'Completed with 4 methods - all targets achieved',
+                'step2_helpers': 'Not needed - targets already met',
+                'step3_reoptimization': 'Not needed - targets already met'
+            }
+        
+        return jsonify(initial_result)
         
     except Exception as e:
         return jsonify({
             "error": f"Advanced RAG meal optimization failed: {str(e)}",
             "status": "error"
         }), 500
+
+def check_target_achievement_advanced(result, target_macros):
+    """Check if targets are achieved with more detailed analysis"""
+    # Try to get nutrition from different result formats
+    nutrition = None
+    
+    if 'meal' in result and 'total_calories' in result['meal']:
+        nutrition = {
+            'calories': result['meal']['total_calories'],
+            'protein': result['meal']['total_protein'],
+            'carbs': result['meal']['total_carbs'],
+            'fat': result['meal']['total_fat']
+        }
+    elif 'optimization_result' in result and 'final_nutrition' in result['optimization_result']:
+        nutrition = result['optimization_result']['final_nutrition']
+    elif 'final_nutrition' in result:
+        nutrition = result['final_nutrition']
+    
+    if not nutrition:
+        return {'overall': False, 'reason': 'Could not extract nutrition data'}
+    
+    # Check each macro with 5% tolerance
+    achievement = {}
+    for macro in ['calories', 'protein', 'carbs', 'fat']:
+        target = target_macros[macro]
+        actual = nutrition[macro]
+        
+        # 5% tolerance
+        tolerance = target * 0.05
+        if abs(actual - target) <= tolerance:
+            achievement[macro] = True
+        else:
+            achievement[macro] = False
+    
+    # Overall achievement
+    achievement['overall'] = all(achievement.values())
+    
+    return achievement
+
+def get_current_ingredients_from_result(result):
+    """Extract current ingredients from optimization result"""
+    ingredients = []
+    
+    # Try different result formats
+    if 'meal' in result and 'items' in result['meal']:
+        # Extract from meal items
+        for item in result['meal']['items']:
+            ingredients.append({
+                'name': item['ingredient'],
+                'protein_per_100g': item.get('protein_per_100g', 0),
+                'carbs_per_100g': item.get('carbs_per_100g', 0),
+                'fat_per_100g': item.get('fat_per_100g', 0),
+                'calories_per_100g': item.get('calories_per_100g', 0),
+                'max_quantity': 300,
+                'category': 'custom'
+            })
+    elif 'ingredients' in result:
+        # Direct ingredients list
+        ingredients = result['ingredients']
+    else:
+        # Fallback: create basic ingredients from target macros
+        ingredients = [
+            {
+                'name': 'Base Ingredient',
+                'protein_per_100g': 20,
+                'carbs_per_100g': 30,
+                'fat_per_100g': 10,
+                'calories_per_100g': 300,
+                'max_quantity': 300,
+                'category': 'base'
+            }
+        ]
+    
+    return ingredients
+
+def add_smart_helper_ingredients(current_ingredients, target_macros, meal_type):
+    """Add smart helper ingredients based on meal type and deficits"""
+    helpers = []
+    
+    # Calculate current totals from ingredients
+    current_totals = {'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0}
+    for ing in current_ingredients:
+        # Use reasonable default quantities (100g each)
+        qty = 100
+        current_totals['calories'] += ing['calories_per_100g'] * qty / 100
+        current_totals['protein'] += ing['protein_per_100g'] * qty / 100
+        current_totals['carbs'] += ing['carbs_per_100g'] * qty / 100
+        current_totals['fat'] += ing['fat_per_100g'] * qty / 100
+    
+    # Calculate deficits
+    protein_deficit = max(0, target_macros['protein'] - current_totals['protein'])
+    carbs_deficit = max(0, target_macros['carbs'] - current_totals['carbs'])
+    fat_deficit = max(0, target_macros['fat'] - current_totals['fat'])
+    calories_deficit = max(0, target_macros['calories'] - current_totals['calories'])
+    
+    print(f"📊 Current totals: {current_totals}")
+    print(f"🎯 Deficits: Protein: {protein_deficit:.1f}g, Carbs: {carbs_deficit:.1f}g, Fat: {fat_deficit:.1f}g, Calories: {calories_deficit:.1f}")
+    
+    # Meal-specific helper ingredients
+    meal_helpers = get_meal_specific_helpers(meal_type)
+    
+    # Add protein helper if needed
+    if protein_deficit > 5:
+        protein_helper = meal_helpers.get('protein', {
+            'name': 'Protein Powder',
+            'protein_per_100g': 80,
+            'carbs_per_100g': 8,
+            'fat_per_100g': 2,
+            'calories_per_100g': 370,
+            'max_quantity': 100,
+            'category': 'protein_supplement'
+        })
+        helpers.append(protein_helper)
+        print(f"➕ Added protein helper: {protein_helper['name']}")
+    
+    # Add carb helper if needed
+    if carbs_deficit > 10:
+        carb_helper = meal_helpers.get('carbs', {
+            'name': 'Oats',
+            'protein_per_100g': 6.9,
+            'carbs_per_100g': 58,
+            'fat_per_100g': 6.9,
+            'calories_per_100g': 389,
+            'max_quantity': 200,
+            'category': 'carb_supplement'
+        })
+        helpers.append(carb_helper)
+        print(f"➕ Added carb helper: {carb_helper['name']}")
+    
+    # Add fat helper if needed
+    if fat_deficit > 3:
+        fat_helper = meal_helpers.get('fat', {
+            'name': 'Olive Oil',
+            'protein_per_100g': 0,
+            'carbs_per_100g': 0,
+            'fat_per_100g': 100,
+            'calories_per_100g': 884,
+            'max_quantity': 30,
+            'category': 'fat_supplement'
+        })
+        helpers.append(fat_helper)
+        print(f"➕ Added fat helper: {fat_helper['name']}")
+    
+    # Add calorie helper if needed
+    if calories_deficit > 50:
+        calorie_helper = meal_helpers.get('calories', {
+            'name': 'Honey',
+            'protein_per_100g': 0,
+            'carbs_per_100g': 80,
+            'fat_per_100g': 0,
+            'calories_per_100g': 307,
+            'max_quantity': 50,
+            'category': 'calorie_supplement'
+        })
+        helpers.append(calorie_helper)
+        print(f"➕ Added calorie helper: {calorie_helper['name']}")
+    
+    return helpers
+
+def get_meal_specific_helpers(meal_type):
+    """Get meal-specific helper ingredients"""
+    helpers = {
+        'breakfast': {
+            'protein': {'name': 'Greek Yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 3.6, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'carbs': {'name': 'Banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 23, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 150, 'category': 'carb_supplement'},
+            'fat': {'name': 'Almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50, 'category': 'fat_supplement'},
+            'calories': {'name': 'Honey', 'protein_per_100g': 0, 'carbs_per_100g': 80, 'fat_per_100g': 0, 'calories_per_100g': 307, 'max_quantity': 30, 'category': 'calorie_supplement'}
+        },
+        'lunch': {
+            'protein': {'name': 'Chicken Breast', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'carbs': {'name': 'Brown Rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 200, 'category': 'carb_supplement'},
+            'fat': {'name': 'Avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 100, 'category': 'fat_supplement'},
+            'calories': {'name': 'Sweet Potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 200, 'category': 'calorie_supplement'}
+        },
+        'dinner': {
+            'protein': {'name': 'Salmon', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 208, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'carbs': {'name': 'Quinoa', 'protein_per_100g': 4.4, 'carbs_per_100g': 22, 'fat_per_100g': 1.9, 'calories_per_100g': 120, 'max_quantity': 200, 'category': 'carb_supplement'},
+            'fat': {'name': 'Olive Oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 884, 'max_quantity': 30, 'category': 'fat_supplement'},
+            'calories': {'name': 'Nuts Mix', 'protein_per_100g': 15, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 500, 'max_quantity': 50, 'category': 'calorie_supplement'}
+        }
+    }
+    
+    return helpers.get(meal_type.lower(), helpers['lunch'])  # Default to lunch helpers
+
+@app.route('/test-scipy-optimization', methods=['POST'])
+def test_scipy_optimization():
+    """Test endpoint for scipy differential evolution optimization with custom ingredients"""
+    try:
+        request_data = request.get_json()
+        
+        if not request_data:
+            return jsonify({"error": "No request data provided"}), 400
+        
+        # Extract custom ingredients and target macros
+        custom_ingredients = request_data.get('ingredients', [])
+        target_macros = request_data.get('target_macros', {})
+        
+        if not custom_ingredients or not target_macros:
+            return jsonify({"error": "Both 'ingredients' and 'target_macros' are required"}), 400
+        
+        # Convert ingredients to the format expected by RAG optimizer
+        formatted_ingredients = []
+        for ing in custom_ingredients:
+            formatted_ing = {
+                'name': ing.get('name', 'Unknown'),
+                'protein_per_100g': ing.get('protein_per_100g', 0),
+                'carbs_per_100g': ing.get('carbs_per_100g', 0),
+                'fat_per_100g': ing.get('fat_per_100g', 0),
+                'calories_per_100g': ing.get('calories_per_100g', 0),
+                'max_quantity': ing.get('max_quantity', 300),
+                'category': ing.get('category', 'custom')
+            }
+            formatted_ingredients.append(formatted_ing)
+        
+        # Test scipy differential evolution optimization
+        result = rag_meal_optimizer._differential_evolution_optimize(
+            formatted_ingredients, 
+            target_macros
+        )
+        
+        return jsonify({
+            "success": True,
+            "method": "SciPy Differential Evolution Test",
+            "input_ingredients": custom_ingredients,
+            "target_macros": target_macros,
+            "optimization_result": result,
+            "message": "SciPy optimization test completed successfully"
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "error": f"SciPy optimization test failed: {str(e)}",
+            "status": "error"
+        }), 500
+
+@app.route('/test-scipy-with-helpers', methods=['POST'])
+def test_scipy_with_helpers():
+    """Test endpoint for scipy optimization with helper ingredients to reach targets precisely"""
+    try:
+        request_data = request.get_json()
+        
+        if not request_data:
+            return jsonify({"error": "No request data provided"}), 400
+        
+        # Extract custom ingredients and target macros
+        custom_ingredients = request_data.get('ingredients', [])
+        target_macros = request_data.get('target_macros', {})
+        
+        if not custom_ingredients or not target_macros:
+            return jsonify({"error": "Both 'ingredients' and 'target_macros' are required"}), 400
+        
+        # Convert ingredients to the format expected by RAG optimizer
+        formatted_ingredients = []
+        for ing in custom_ingredients:
+            formatted_ing = {
+                'name': ing.get('name', 'Unknown'),
+                'protein_per_100g': ing.get('protein_per_100g', 0),
+                'carbs_per_100g': ing.get('carbs_per_100g', 0),
+                'fat_per_100g': ing.get('fat_per_100g', 0),
+                'calories_per_100g': ing.get('calories_per_100g', 0),
+                'max_quantity': ing.get('max_quantity', 300),
+                'category': ing.get('category', 'custom')
+            }
+            formatted_ingredients.append(formatted_ing)
+        
+        # Add helper ingredients to reach targets
+        helper_ingredients = add_helper_ingredients(formatted_ingredients, target_macros)
+        all_ingredients = formatted_ingredients + helper_ingredients
+        
+        print(f"🔧 Added {len(helper_ingredients)} helper ingredients")
+        for helper in helper_ingredients:
+            print(f"  • {helper['name']}: {helper['protein_per_100g']}g protein, {helper['carbs_per_100g']}g carbs, {helper['fat_per_100g']}g fat")
+        
+        # Test scipy differential evolution optimization with all ingredients
+        result = rag_meal_optimizer._differential_evolution_optimize(
+            all_ingredients, 
+            target_macros
+        )
+        
+        # Calculate final nutrition with helper ingredients
+        if result.get('success') and result.get('quantities'):
+            final_nutrition = calculate_final_nutrition_with_helpers(all_ingredients, result['quantities'])
+            result['final_nutrition'] = final_nutrition
+            result['target_achievement'] = check_target_achievement(final_nutrition, target_macros)
+        
+        return jsonify({
+            "success": True,
+            "method": "SciPy with Helper Ingredients",
+            "input_ingredients": custom_ingredients,
+            "helper_ingredients": helper_ingredients,
+            "all_ingredients": all_ingredients,
+            "target_macros": target_macros,
+            "optimization_result": result,
+            "message": "SciPy optimization with helpers completed successfully"
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "error": f"SciPy optimization with helpers failed: {str(e)}",
+            "status": "error"
+        }), 500
+
+def add_helper_ingredients(ingredients, target_macros):
+    """Add helper ingredients to reach targets more precisely"""
+    helpers = []
+    
+    # Calculate current totals from main ingredients
+    current_totals = {'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0}
+    for ing in ingredients:
+        # Use reasonable default quantities (100g each)
+        qty = 100
+        current_totals['calories'] += ing['calories_per_100g'] * qty / 100
+        current_totals['protein'] += ing['protein_per_100g'] * qty / 100
+        current_totals['carbs'] += ing['carbs_per_100g'] * qty / 100
+        current_totals['fat'] += ing['fat_per_100g'] * qty / 100
+    
+    # Calculate deficits
+    protein_deficit = max(0, target_macros['protein'] - current_totals['protein'])
+    carbs_deficit = max(0, target_macros['carbs'] - current_totals['carbs'])
+    fat_deficit = max(0, target_macros['fat'] - current_totals['fat'])
+    calories_deficit = max(0, target_macros['calories'] - current_totals['calories'])
+    
+    print(f"📊 Current totals: {current_totals}")
+    print(f"🎯 Deficits: Protein: {protein_deficit:.1f}g, Carbs: {carbs_deficit:.1f}g, Fat: {fat_deficit:.1f}g, Calories: {calories_deficit:.1f}")
+    
+    # Add protein helper if needed
+    if protein_deficit > 5:  # Only add if deficit is significant
+        protein_helper = {
+            'name': 'Protein Powder',
+            'protein_per_100g': 80,
+            'carbs_per_100g': 8,
+            'fat_per_100g': 2,
+            'calories_per_100g': 370,
+            'max_quantity': 100,
+            'category': 'protein_supplement'
+        }
+        helpers.append(protein_helper)
+        print(f"➕ Added protein helper: {protein_helper['name']}")
+    
+    # Add carb helper if needed
+    if carbs_deficit > 10:  # Only add if deficit is significant
+        carb_helper = {
+            'name': 'Oats',
+            'protein_per_100g': 6.9,
+            'carbs_per_100g': 58,
+            'fat_per_100g': 6.9,
+            'calories_per_100g': 389,
+            'max_quantity': 200,
+            'category': 'carb_supplement'
+        }
+        helpers.append(carb_helper)
+        print(f"➕ Added carb helper: {carb_helper['name']}")
+    
+    # Add fat helper if needed
+    if fat_deficit > 3:  # Only add if deficit is significant
+        fat_helper = {
+            'name': 'Olive Oil',
+            'protein_per_100g': 0,
+            'carbs_per_100g': 0,
+            'fat_per_100g': 100,
+            'calories_per_100g': 884,
+            'max_quantity': 30,
+            'category': 'fat_supplement'
+        }
+        helpers.append(fat_helper)
+        print(f"➕ Added fat helper: {fat_helper['name']}")
+    
+    # Add calorie helper if needed
+    if calories_deficit > 50:  # Only add if deficit is significant
+        calorie_helper = {
+            'name': 'Honey',
+            'protein_per_100g': 0,
+            'carbs_per_100g': 80,
+            'fat_per_100g': 0,
+            'calories_per_100g': 307,
+            'max_quantity': 50,
+            'category': 'calorie_supplement'
+        }
+        helpers.append(calorie_helper)
+        print(f"➕ Added calorie helper: {calorie_helper['name']}")
+    
+    return helpers
+
+def calculate_final_nutrition_with_helpers(ingredients, quantities):
+    """Calculate final nutrition including helper ingredients"""
+    totals = {'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0}
+    
+    for i, ingredient in enumerate(ingredients):
+        if i < len(quantities):
+            quantity = quantities[i] / 100  # Convert grams to ratio
+            totals['calories'] += ingredient['calories_per_100g'] * quantity
+            totals['protein'] += ingredient['protein_per_100g'] * quantity
+            totals['carbs'] += ingredient['carbs_per_100g'] * quantity
+            totals['fat'] += ingredient['fat_per_100g'] * quantity
+    
+    return totals
+
+def check_target_achievement(final_nutrition, target_macros):
+    """Check if targets are achieved"""
+    achievement = {}
+    
+    for macro in ['calories', 'protein', 'carbs', 'fat']:
+        target = target_macros[macro]
+        actual = final_nutrition[macro]
+        
+        if actual >= target * 0.95:  # 95% of target is considered achieved
+            achievement[macro] = True
+        else:
+            achievement[macro] = False
+    
+    # Overall achievement
+    achievement['overall'] = all(achievement.values())
+    
+    return achievement
 
 @app.route('/api/ingredients', methods=['GET'])
 def get_ingredients():
@@ -510,6 +991,8 @@ if __name__ == '__main__':
     print("   POST /optimize-single-meal - Main optimization endpoint")
     print("   POST /optimize-single-meal-rag - Single meal RAG optimization")
     print("   POST /optimize-single-meal-rag-advanced - Advanced RAG optimization")
+    print("   POST /test-scipy-optimization - Test SciPy optimization")
+    print("   POST /test-scipy-with-helpers - Test SciPy with helper ingredients")
     print("   GET  /api/ingredients - Get available ingredients")
     print("   GET  /api/rag-ingredients - Get RAG ingredients")
     print("=" * 60)

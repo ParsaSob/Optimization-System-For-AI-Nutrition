@@ -21,6 +21,23 @@ from sklearn.neural_network import MLPRegressor
 import warnings
 warnings.filterwarnings('ignore')
 
+def convert_numpy_types(obj):
+    """Convert numpy types to Python native types for JSON serialization"""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    else:
+        return obj
+
 # Advanced optimization libraries
 try:
     import optuna
@@ -470,7 +487,7 @@ class RAGMealOptimizer:
             
             computation_time = time.time() - start_time
             
-            return {
+            result = {
                 "optimization_result": {
                     "success": True,
                     "method": optimization_result['method'],
@@ -495,9 +512,12 @@ class RAGMealOptimizer:
                 "rag_enhancement": rag_enhancement
             }
             
+            # Convert numpy types to Python native types for JSON serialization
+            return convert_numpy_types(result)
+            
         except Exception as e:
             logger.error(f"Error in single meal optimization: {e}")
-            return {
+            error_result = {
                 "optimization_result": {
                     "success": False,
                     "method": "Error",
@@ -510,6 +530,9 @@ class RAGMealOptimizer:
                 "recommendations": [f"Optimization failed: {str(e)}"],
                 "rag_enhancement": {}
             }
+            
+            # Convert numpy types to Python native types for JSON serialization
+            return convert_numpy_types(error_result)
     
     def _extract_rag_ingredients(self, rag_response: Dict) -> List[Dict]:
         """Extract ingredients from RAG response"""
@@ -3316,13 +3339,16 @@ class RAGMealOptimizer:
             total_carbs += carbs
             total_fat += fat
         
-        return {
+        result = {
             'items': meal_items,
             'calories': total_calories,
             'protein': total_protein,
             'carbs': total_carbs,
             'fat': total_fat
         }
+        
+        # Convert numpy types to Python native types for JSON serialization
+        return convert_numpy_types(result)
     
     def _check_target_achievement(
         self, 
@@ -3353,7 +3379,7 @@ class RAGMealOptimizer:
         
         overall_achieved = calories_achieved and protein_achieved and carbs_achieved and fat_achieved
         
-        return {
+        result = {
             'calories_achieved': calories_achieved,
             'protein_achieved': protein_achieved,
             'carbs_achieved': carbs_achieved,
@@ -3366,6 +3392,9 @@ class RAGMealOptimizer:
                 'fat': round(fat_diff, 1)
             }
         }
+        
+        # Convert numpy types to Python native types for JSON serialization
+        return convert_numpy_types(result)
     
     def _calculate_enhancement_details(
         self, 
@@ -3378,13 +3407,16 @@ class RAGMealOptimizer:
         supplements_count = len(supplementary_ingredients)
         total_count = len(final_meal['items'])
         
-        return {
+        result = {
             'enhancement_method': 'Mathematical optimization to meet targets',
             'original_ingredients': original_count,
             'supplements_added': supplements_count,
             'total_ingredients': total_count,
             'enhancement_ratio': round(supplements_count / max(original_count, 1), 2)
         }
+        
+        # Convert numpy types to Python native types for JSON serialization
+        return convert_numpy_types(result)
     
     def _generate_recommendations(self, final_meal: Dict, target_macros: Dict) -> List[str]:
         """Generate personalized recommendations"""

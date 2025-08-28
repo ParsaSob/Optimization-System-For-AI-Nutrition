@@ -379,10 +379,22 @@ class RAGMealOptimizer:
         """Attach chosen quantities to ingredient dicts (safe against length mismatch)."""
         out = []
         n = min(len(ingredients), len(quantities))
+        
+        logger.info(f"🔧 Materializing {n} ingredients with quantities:")
         for i in range(n):
             ing = dict(ingredients[i])
-            ing['quantity_needed'] = max(0.0, float(quantities[i]))
+            original_qty = ing.get('quantity', 0)  # Original input quantity
+            optimized_qty = max(0.0, float(quantities[i]))
+            
+            # Ensure input ingredients maintain reasonable quantities
+            if original_qty > 0 and optimized_qty < 10.0:
+                logger.info(f"   ⚠️ Input ingredient '{ing['name']}' quantity too low ({optimized_qty:.1f}g), preserving minimum")
+                optimized_qty = max(10.0, original_qty * 0.1)  # At least 10g or 10% of original
+            
+            ing['quantity_needed'] = optimized_qty
+            logger.info(f"   - {ing['name']}: original={original_qty}g, optimized={optimized_qty:.1f}g")
             out.append(ing)
+        
         # ignore any tail mismatch safely
         return out
 

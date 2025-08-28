@@ -403,11 +403,12 @@ class RAGMealOptimizer:
                 normalized[m] = defaults[m]
         return normalized
 
-    def _extract_rag_ingredients(self, rag_response: Union[Dict, List]) -> List[Dict]:
+    def _extract_rag_ingredients(self, rag_response: Union[Dict, List, str]) -> List[Dict]:
         """Support multiple shapes:
            - {'suggestions': [{'ingredients': [...]}]}
            - {'ingredients': [...]}
            - [{'name': 'chicken', 'quantity': 100}, ...]
+           - "گوشت، پیاز، گوجه" (string format - extract ingredient names)
         """
         ingredients = []
         seen = set()
@@ -421,8 +422,55 @@ class RAGMealOptimizer:
             elif 'suggestions' in rag_response and isinstance(rag_response['suggestions'], list):
                 for s in rag_response['suggestions']:
                     candidates.extend(s.get('ingredients', []))
+        elif isinstance(rag_response, str):
+            # Parse string format for ingredient names
+            # Example: "یک وعده غذایی سالم برای ناهار با گوشت، پیاز، گوجه و نان پیتا"
+            # Extract common food terms
+            import re
+            food_keywords = [
+                'گوشت', 'chicken', 'مرغ', 'beef', 'گوساله', 'lamb', 'بره',
+                'پیاز', 'onion', 'گوجه', 'tomato', 'نان', 'bread', 'پیتا', 'pita',
+                'برنج', 'rice', 'سبزی', 'vegetables', 'سالاد', 'salad',
+                'ماکارونی', 'pasta', 'سیب‌زمینی', 'potato'
+            ]
+            
+            # Map Persian/English food terms to standard ingredient names
+            food_mapping = {
+                'گوشت': 'chicken_breast',
+                'مرغ': 'chicken_breast', 
+                'chicken': 'chicken_breast',
+                'پیاز': 'onion',
+                'onion': 'onion',
+                'گوجه': 'tomato', 
+                'tomato': 'tomato',
+                'نان': 'whole_grain_bread',
+                'bread': 'whole_grain_bread',
+                'پیتا': 'pita_bread',
+                'pita': 'pita_bread',
+                'برنج': 'brown_rice',
+                'rice': 'brown_rice'
+            }
+            
+            text_lower = rag_response.lower()
+            logger.info(f"🔍 Parsing text: '{text_lower}'")
+            string_seen = set()  # Separate seen set for string parsing
+            for keyword in food_keywords:
+                keyword_lower = keyword.lower()
+                if keyword_lower in text_lower:
+                    ingredient_name = food_mapping.get(keyword, keyword)
+                    logger.info(f"✅ Found ingredient: '{keyword}' -> '{ingredient_name}'")
+                    if ingredient_name not in string_seen:
+                        candidates.append({'name': ingredient_name, 'quantity': 100})
+                        string_seen.add(ingredient_name)
+            logger.info(f"📋 Total candidates found: {len(candidates)}")
 
         for ing in candidates:
+            # Handle both dict and string ingredients
+            if isinstance(ing, str):
+                ing = {'name': ing, 'quantity': 100}
+            elif not isinstance(ing, dict):
+                continue
+                
             name = str(ing.get('name', '')).strip()
             if not name:
                 continue

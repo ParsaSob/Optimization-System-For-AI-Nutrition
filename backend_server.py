@@ -7,6 +7,7 @@ Simple server with only two endpoints: /health and /optimize-meal
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
+import os
 from rag_optimization_engine import RAGMealOptimizer
 
 app = Flask(__name__)
@@ -62,6 +63,17 @@ if __name__ == '__main__':
     print("🚀 Starting Meal Optimization Server...")
     print("📡 Endpoints:")
     print("   - GET  /health")
-    print("   - POST /optimize-meal")
-    print("🌐 Server will run on http://localhost:5000")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    print("   - POST  /optimize-meal")
+    
+    # Get port from environment variable (for Render) or use default
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('FLASK_ENV') == 'development'
+    
+    print(f"🌐 Server will run on port: {port}")
+    print(f"🔧 Debug mode: {debug_mode}")
+    
+    try:
+        app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    except Exception as e:
+        print(f"❌ Error starting server: {e}")
+        exit(1)

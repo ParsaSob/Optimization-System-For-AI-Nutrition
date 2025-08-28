@@ -1,19 +1,12 @@
 services:
   - type: web
-    name: rag-meal-optimizer
-    env: docker
+    name: meal-optimization-api
+    env: python
     plan: free
-    dockerfilePath: ./Dockerfile
-    healthCheckPath: /health
-    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: python backend_server.py
     envVars:
-      - key: FLASK_APP
-        value: backend_server.py
-      - key: FLASK_ENV
-        value: production
-      - key: PYTHONPATH
-        value: .
+      - key: PYTHON_VERSION
+        value: 3.11.0
       - key: PORT
-        value: 5000
-      - key: SERVER_TYPE
-        value: flask
+        value: 10000

@@ -3605,15 +3605,43 @@ class RAGMealOptimizer:
         # First try to find candidates in the specific meal type
         candidates = self.helper_ingredients[meal_type][macro]
         
-        # If no candidates found, try lunch as fallback
-        if not candidates and meal_type != 'lunch':
-            candidates = self.helper_ingredients['lunch'][macro]
+        # Define fallback priority based on meal type for better context
+        fallback_priority = []
+        if 'snack' in meal_type.lower():
+            # For snacks, only use other snack types as fallback (never use main meals)
+            fallback_priority = ['morning_snack', 'afternoon_snack', 'evening_snack']
+        elif meal_type == 'breakfast':
+            # For breakfast, prefer lunch as fallback (similar meal size)
+            fallback_priority = ['lunch', 'dinner']
+        elif meal_type == 'dinner':
+            # For dinner, prefer lunch as fallback (similar meal size)
+            fallback_priority = ['lunch', 'breakfast']
+        else:  # lunch or other
+            fallback_priority = ['breakfast', 'dinner']
         
-        # If still no candidates, try breakfast
-        if not candidates and meal_type != 'breakfast':
-            candidates = self.helper_ingredients['breakfast'][macro]
+        # Try fallbacks in priority order
+        for fallback_meal in fallback_priority:
+            if not candidates and fallback_meal != meal_type and fallback_meal in self.helper_ingredients:
+                if macro in self.helper_ingredients[fallback_meal]:
+                    candidates = self.helper_ingredients[fallback_meal][macro]
+                    logger.info(f"🔄 Using {fallback_meal} ingredients as fallback for {meal_type}")
+                    break
         
-        logger.info(f"🔍 Looking for {macro} helpers in {meal_type}, found {len(candidates)} candidates")
+        # Log the source of candidates
+        if candidates == self.helper_ingredients[meal_type][macro]:
+            logger.info(f"🔍 Looking for {macro} helpers in {meal_type}, found {len(candidates)} candidates")
+        else:
+            # Find which fallback meal type we're using
+            fallback_meal = None
+            for meal in ['breakfast', 'lunch', 'dinner', 'morning_snack', 'afternoon_snack', 'evening_snack']:
+                if meal in self.helper_ingredients and macro in self.helper_ingredients[meal]:
+                    if candidates == self.helper_ingredients[meal][macro]:
+                        fallback_meal = meal
+                        break
+            if fallback_meal:
+                logger.info(f"🔍 Looking for {macro} helpers in {meal_type} (using {fallback_meal} ingredients), found {len(candidates)} candidates")
+            else:
+                logger.info(f"🔍 Looking for {macro} helpers in {meal_type}, found {len(candidates)} candidates")
         
         for cand in candidates:
             nm = cand['name'].strip().lower()
@@ -3976,7 +4004,9 @@ class RAGMealOptimizer:
                 {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 100},
                 {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 100},
                 {'name': 'turkey_jerky', 'protein_per_100g': 30, 'carbs_per_100g': 3, 'fat_per_100g': 1, 'calories_per_100g': 150, 'max_quantity': 50},
-                {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80}
+                {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80},
+                {'name': 'protein_shake', 'protein_per_100g': 80, 'carbs_per_100g': 5, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'quinoa', 'protein_per_100g': 14, 'carbs_per_100g': 64, 'fat_per_100g': 6, 'calories_per_100g': 368, 'max_quantity': 100}
             ]),
             'carbs': [
                 {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
@@ -3985,7 +4015,9 @@ class RAGMealOptimizer:
                 {'name': 'banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 22, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 100},
                 {'name': 'dried_apricots', 'protein_per_100g': 3.4, 'carbs_per_100g': 63, 'fat_per_100g': 0.5, 'calories_per_100g': 241, 'max_quantity': 50},
                 {'name': 'rice_cakes', 'protein_per_100g': 8, 'carbs_per_100g': 80, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
-                {'name': 'oat_bar', 'protein_per_100g': 8, 'carbs_per_100g': 60, 'fat_per_100g': 8, 'calories_per_100g': 350, 'max_quantity': 60}
+                {'name': 'oat_bar', 'protein_per_100g': 8, 'carbs_per_100g': 60, 'fat_per_100g': 8, 'calories_per_100g': 350, 'max_quantity': 60},
+                {'name': 'quinoa', 'protein_per_100g': 14, 'carbs_per_100g': 64, 'fat_per_100g': 6, 'calories_per_100g': 368, 'max_quantity': 100},
+                {'name': 'sweet_potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 150}
             ],
             'fat': [
                 {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
@@ -4004,7 +4036,9 @@ class RAGMealOptimizer:
                 {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 100},
                 {'name': 'hummus', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 10, 'calories_per_100g': 166, 'max_quantity': 100},
                 {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80},
-                {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 100}
+                {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 100},
+                {'name': 'protein_shake', 'protein_per_100g': 80, 'carbs_per_100g': 5, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'quinoa', 'protein_per_100g': 14, 'carbs_per_100g': 64, 'fat_per_100g': 6, 'calories_per_100g': 368, 'max_quantity': 100}
             ]),
             'carbs': [
                 {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},

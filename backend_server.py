@@ -457,7 +457,7 @@ def optimize_single_meal_rag_advanced():
         
         # Step 1: Run initial optimization with 5 methods using advanced method
         print("\n📊 Step 1: Running initial optimization with 5 methods...")
-        initial_result = rag_meal_optimizer.optimize_single_meal_advanced(
+        initial_result = rag_meal_optimizer.optimize_single_meal(
             rag_response=rag_response,
             target_macros=target_macros,
             user_preferences=user_preferences,

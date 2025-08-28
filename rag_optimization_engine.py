@@ -1276,8 +1276,9 @@ class RAGMealOptimizer:
             balanced_ing['quantity_needed'] = current_quantities[i]
             balanced_ingredients.append(balanced_ing)
         
-        # 🎯 AGGRESSIVE STRATEGY SELECTION - Including ultra-aggressive methods
+        # 🎯 ULTRA-PRECISE STRATEGY SELECTION - Including ultra-precise methods
         essential_strategies = [
+            self._balance_by_ultra_precise_iterative,  # 🎯🎯🎯 Ultra-precise iterative (most precise)
             self._balance_by_aggressive_target_reach,  # 🚀🚀🚀 Ultra-aggressive (most aggressive)
             self._balance_by_smart_scaling,            # 🎯 Smart scaling (aggressive)
             self._balance_by_macro_redistribution      # 🔄 Macro redistribution (aggressive)
@@ -1619,19 +1620,19 @@ class RAGMealOptimizer:
                         best_ingredient_idx = i
                 
                 if best_ingredient_idx >= 0 and best_macro_content > 0:
-                    # Calculate exactly how much we need to add
+                    # Calculate exactly how much we need to add - MORE PRECISE
                     current_qty = new_quantities[best_ingredient_idx]
-                    additional_needed = gap * 0.9  # Try to fill 90% of the gap
+                    additional_needed = gap * 0.95  # Try to fill 95% of the gap (more precise)
                     additional_amount = (additional_needed * 100) / best_macro_content
                     
-                    # ULTRA-AGGRESSIVE scaling
+                    # ULTRA-AGGRESSIVE scaling with PRECISION
                     new_qty = current_qty + additional_amount
-                    new_qty = max(new_qty, 50.0)  # Minimum 50g
-                    max_qty = float(ingredients[best_ingredient_idx].get('max_quantity', 1500))  # Very high max
+                    new_qty = max(new_qty, 30.0)  # Lower minimum for precision
+                    max_qty = float(ingredients[best_ingredient_idx].get('max_quantity', 2000))  # Even higher max for precision
                     new_qty = min(new_qty, max_qty)
                     
                     new_quantities[best_ingredient_idx] = new_qty
-                    logger.info(f"🚀🚀 ULTRA-AGGRESSIVE: {ingredients[best_ingredient_idx]['name']}: {current_qty:.1f}g → {new_qty:.1f}g (fills {macro} gap)")
+                    logger.info(f"🚀🚀🚀 ULTRA-PRECISE: {ingredients[best_ingredient_idx]['name']}: {current_qty:.1f}g → {new_qty:.1f}g (fills {macro} gap by {additional_needed:.1f}g)")
         
         # For each macro with excess, find the worst ingredient and scale it down massively
         for macro, gap in gaps_to_target.items():
@@ -1649,16 +1650,16 @@ class RAGMealOptimizer:
                         worst_ingredient_idx = i
                 
                 if worst_ingredient_idx >= 0 and worst_macro_content > 0:
-                    # Calculate exactly how much we need to reduce
+                    # Calculate exactly how much we need to reduce - MORE PRECISE
                     current_qty = new_quantities[worst_ingredient_idx]
-                    excess_amount = abs(gap) * 0.8  # Try to reduce 80% of the excess
+                    excess_amount = abs(gap) * 0.9  # Try to reduce 90% of the excess (more precise)
                     reduction_amount = (excess_amount * 100) / worst_macro_content
                     
-                    # ULTRA-AGGRESSIVE reduction
-                    new_qty = max(current_qty - reduction_amount, 5.0)  # Minimum 5g
+                    # ULTRA-AGGRESSIVE reduction with PRECISION
+                    new_qty = max(current_qty - reduction_amount, 10.0)  # Higher minimum for precision
                     
                     new_quantities[worst_ingredient_idx] = new_qty
-                    logger.info(f"📉📉 ULTRA-AGGRESSIVE: {ingredients[worst_ingredient_idx]['name']}: {current_qty:.1f}g → {new_qty:.1f}g (reduces {macro} excess)")
+                    logger.info(f"📉📉📉 ULTRA-PRECISE: {ingredients[worst_ingredient_idx]['name']}: {current_qty:.1f}g → {new_qty:.1f}g (reduces {macro} excess by {excess_amount:.1f}g)")
         
         # Final verification and adjustment
         final_totals = self._calculate_final_meal(ingredients, new_quantities)
@@ -1671,6 +1672,73 @@ class RAGMealOptimizer:
         logger.info(f"🎯 ULTRA-AGGRESSIVE: Final gaps after ultra-aggressive scaling: {final_gaps}")
         
         return {'quantities': new_quantities, 'method': 'ultra_aggressive_target_reach'}
+
+    def _balance_by_ultra_precise_iterative(self, ingredients: List[Dict], target_macros: Dict, gaps: Dict) -> Optional[Dict]:
+        """ULTRA-PRECISE iterative method that fine-tunes to within 1% of targets."""
+        logger.info("🎯🎯🎯 ULTRA-PRECISE iterative fine-tuning activated!")
+        
+        # Start with current quantities
+        new_quantities = [ing.get('quantity_needed', 0) for ing in ingredients]
+        
+        # Iterative fine-tuning - up to 5 iterations for precision
+        for iteration in range(5):
+            current_totals = self._calculate_final_meal(ingredients, new_quantities)
+            current_gaps = {}
+            
+            for macro in ['protein', 'carbs', 'fat']:
+                current = current_totals.get(macro, 0)
+                target = target_macros.get(macro, 0)
+                current_gaps[macro] = target - current
+            
+            logger.info(f"🎯 Iteration {iteration + 1}: Gaps: {current_gaps}")
+            
+            # Check if we're within 1% of all targets
+            all_within_1_percent = True
+            for macro, gap in current_gaps.items():
+                target = target_macros.get(macro, 0)
+                if target > 0 and abs(gap) / target > 0.01:  # More than 1% off
+                    all_within_1_percent = False
+                    break
+            
+            if all_within_1_percent:
+                logger.info(f"🎯🎯🎯 All targets within 1% achieved after {iteration + 1} iterations!")
+                break
+            
+            # Fine-tune each macro
+            for macro, gap in current_gaps.items():
+                if abs(gap) < 2:  # Skip tiny gaps
+                    continue
+                    
+                # Find best ingredient for this macro
+                best_idx = -1
+                best_content = 0
+                for i, ing in enumerate(ingredients):
+                    content = ing.get(f'{macro}_per_100g', 0)
+                    if content > best_content:
+                        best_content = content
+                        best_idx = i
+                
+                if best_idx >= 0 and best_content > 0:
+                    current_qty = new_quantities[best_idx]
+                    
+                    if gap > 0:  # Need more
+                        # Very precise addition
+                        additional_needed = gap * 0.98  # Fill 98% of gap
+                        additional_amount = (additional_needed * 100) / best_content
+                        new_qty = current_qty + additional_amount
+                        new_qty = max(new_qty, 20.0)
+                        new_qty = min(new_qty, float(ingredients[best_idx].get('max_quantity', 2500)))
+                        new_quantities[best_idx] = new_qty
+                        logger.info(f"🎯 Fine-tune {macro}: {ingredients[best_idx]['name']} +{additional_amount:.1f}g")
+                    else:  # Need less
+                        # Very precise reduction
+                        reduction_needed = abs(gap) * 0.95  # Reduce 95% of excess
+                        reduction_amount = (reduction_needed * 100) / best_content
+                        new_qty = max(current_qty - reduction_amount, 15.0)
+                        new_quantities[best_idx] = new_qty
+                        logger.info(f"🎯 Fine-tune {macro}: {ingredients[best_idx]['name']} -{reduction_amount:.1f}g")
+        
+        return {'quantities': new_quantities, 'method': 'ultra_precise_iterative'}
 
     def _balance_by_ingredient_prioritization(self, ingredients: List[Dict], target_macros: Dict, gaps: Dict) -> Optional[Dict]:
         """Balance by prioritizing ingredients that best help achieve targets."""

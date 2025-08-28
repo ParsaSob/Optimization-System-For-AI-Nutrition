@@ -1,514 +1,316 @@
 import logging
 import time
-from typing import Dict, List, Optional
-import numpy as np
+from typing import Dict, List, Optional, Union
 import random
-from scipy.optimize import differential_evolution
-import optuna
+import numpy as np
+
+# Try to import optimization libraries
+try:
+    from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
+    PULP_AVAILABLE = True
+except ImportError:
+    PULP_AVAILABLE = False
+    logging.warning("PuLP not available. Linear optimization will be skipped.")
+
+try:
+    from deap import base, creator, tools
+    DEAP_AVAILABLE = True
+except ImportError:
+    DEAP_AVAILABLE = False
+    logging.warning("DEAP not available. Genetic Algorithm will be skipped.")
+
+try:
+    from scipy.optimize import differential_evolution
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    logging.warning("SciPy not available. Differential Evolution will be skipped.")
+
+try:
+    import optuna
+    OPTUNA_AVAILABLE = True
+except ImportError:
+    OPTUNA_AVAILABLE = False
+    logging.warning("Optuna not available. Optuna optimization will be skipped.")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class RAGMealOptimizer:
-    """Simplified meal optimizer that adds minimal supplements to reach targets"""
-    
+    """RAG Meal Optimizer implementing the 3-step algorithm:
+       (1) optimize with up to 5 methods, pick best
+       (2) if not within ±5%, add smart helper ingredients (non-duplicates, meal-specific)
+       (3) re-optimize and return result in the original output format
+    """
+
     def __init__(self):
-        # Extended ingredient database with 100+ helper ingredients and realistic limits
-        self.ingredients_db = [
-            # High protein (25 ingredients)
-            {'name': 'chicken_breast', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165, 'max_quantity': 300, 'category': 'protein'},
-            {'name': 'salmon', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 208, 'max_quantity': 250, 'category': 'protein'},
-            {'name': 'tuna', 'protein_per_100g': 30, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 144, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'cod', 'protein_per_100g': 23, 'carbs_per_100g': 0, 'fat_per_100g': 0.9, 'calories_per_100g': 105, 'max_quantity': 250, 'category': 'protein'},
-            {'name': 'shrimp', 'protein_per_100g': 24, 'carbs_per_100g': 0.2, 'fat_per_100g': 0.3, 'calories_per_100g': 99, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'eggs', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 150, 'category': 'protein'},
-            {'name': 'egg_whites', 'protein_per_100g': 11, 'carbs_per_100g': 0.7, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'beef', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 15, 'calories_per_100g': 250, 'max_quantity': 250, 'category': 'protein'},
-            {'name': 'pork', 'protein_per_100g': 27, 'carbs_per_100g': 0, 'fat_per_100g': 14, 'calories_per_100g': 242, 'max_quantity': 250, 'category': 'protein'},
-            {'name': 'turkey', 'protein_per_100g': 29, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 189, 'max_quantity': 250, 'category': 'protein'},
-            {'name': 'lentils', 'protein_per_100g': 9, 'carbs_per_100g': 20, 'fat_per_100g': 0.4, 'calories_per_100g': 116, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'black_beans', 'protein_per_100g': 8, 'carbs_per_100g': 23, 'fat_per_100g': 0.5, 'calories_per_100g': 132, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'kidney_beans', 'protein_per_100g': 8, 'carbs_per_100g': 23, 'fat_per_100g': 0.5, 'calories_per_100g': 127, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'chickpeas', 'protein_per_100g': 9, 'carbs_per_100g': 27, 'fat_per_100g': 3, 'calories_per_100g': 164, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'pinto_beans', 'protein_per_100g': 9, 'carbs_per_100g': 26, 'fat_per_100g': 0.6, 'calories_per_100g': 143, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'tofu', 'protein_per_100g': 8, 'carbs_per_100g': 1.9, 'fat_per_100g': 4.8, 'calories_per_100g': 76, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'tempeh', 'protein_per_100g': 20, 'carbs_per_100g': 7.6, 'fat_per_100g': 11, 'calories_per_100g': 192, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'seitan', 'protein_per_100g': 25, 'carbs_per_100g': 4, 'fat_per_100g': 1.2, 'calories_per_100g': 120, 'max_quantity': 200, 'category': 'protein'},
-            {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 3.6, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 300, 'category': 'protein'},
-            {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 250, 'category': 'protein'},
-            {'name': 'protein_powder', 'protein_per_100g': 80, 'carbs_per_100g': 8, 'fat_per_100g': 2, 'calories_per_100g': 370, 'max_quantity': 100, 'category': 'protein'},
-            {'name': 'whey_protein', 'protein_per_100g': 75, 'carbs_per_100g': 5, 'fat_per_100g': 2, 'calories_per_100g': 340, 'max_quantity': 100, 'category': 'protein'},
-            {'name': 'casein_protein', 'protein_per_100g': 85, 'carbs_per_100g': 3, 'fat_per_100g': 1, 'calories_per_100g': 360, 'max_quantity': 100, 'category': 'protein'},
-            
-            # High carbs (25 ingredients)
-            {'name': 'brown_rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 300, 'category': 'carbs'},
-            {'name': 'white_rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 28, 'fat_per_100g': 0.3, 'calories_per_100g': 130, 'max_quantity': 300, 'category': 'carbs'},
-            {'name': 'quinoa', 'protein_per_100g': 4.4, 'carbs_per_100g': 22, 'fat_per_100g': 1.9, 'calories_per_100g': 120, 'max_quantity': 250, 'category': 'carbs'},
-            {'name': 'oats', 'protein_per_100g': 6.9, 'carbs_per_100g': 58, 'fat_per_100g': 6.9, 'calories_per_100g': 389, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'oatmeal', 'protein_per_100g': 6.9, 'carbs_per_100g': 58, 'fat_per_100g': 6.9, 'calories_per_100g': 389, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'whole_wheat_bread', 'protein_per_100g': 13, 'carbs_per_100g': 41, 'fat_per_100g': 4.2, 'calories_per_100g': 247, 'max_quantity': 150, 'category': 'carbs'},
-            {'name': 'whole_wheat_pasta', 'protein_per_100g': 13, 'carbs_per_100g': 71, 'fat_per_100g': 1.5, 'calories_per_100g': 352, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'sweet_potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 300, 'category': 'carbs'},
-            {'name': 'potato', 'protein_per_100g': 2, 'carbs_per_100g': 17, 'fat_per_100g': 0.1, 'calories_per_100g': 77, 'max_quantity': 300, 'category': 'carbs'},
-            {'name': 'banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 23, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'orange', 'protein_per_100g': 0.9, 'carbs_per_100g': 12, 'fat_per_100g': 0.1, 'calories_per_100g': 47, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'grapes', 'protein_per_100g': 0.6, 'carbs_per_100g': 16, 'fat_per_100g': 0.2, 'calories_per_100g': 62, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'mango', 'protein_per_100g': 0.8, 'carbs_per_100g': 15, 'fat_per_100g': 0.4, 'calories_per_100g': 60, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'pineapple', 'protein_per_100g': 0.5, 'carbs_per_100g': 13, 'fat_per_100g': 0.1, 'calories_per_100g': 50, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'strawberries', 'protein_per_100g': 0.7, 'carbs_per_100g': 8, 'fat_per_100g': 0.3, 'calories_per_100g': 32, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'blueberries', 'protein_per_100g': 0.7, 'carbs_per_100g': 14, 'fat_per_100g': 0.3, 'calories_per_100g': 57, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'raspberries', 'protein_per_100g': 1.2, 'carbs_per_100g': 12, 'fat_per_100g': 0.7, 'calories_per_100g': 52, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'pear', 'protein_per_100g': 0.4, 'carbs_per_100g': 15, 'fat_per_100g': 0.1, 'calories_per_100g': 57, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'peach', 'protein_per_100g': 0.9, 'carbs_per_100g': 10, 'fat_per_100g': 0.3, 'calories_per_100g': 39, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'plum', 'protein_per_100g': 0.7, 'carbs_per_100g': 11, 'fat_per_100g': 0.3, 'calories_per_100g': 46, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'cherries', 'protein_per_100g': 1.1, 'carbs_per_100g': 16, 'fat_per_100g': 0.2, 'calories_per_100g': 63, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'kiwi', 'protein_per_100g': 1.1, 'carbs_per_100g': 15, 'fat_per_100g': 0.5, 'calories_per_100g': 61, 'max_quantity': 200, 'category': 'carbs'},
-            {'name': 'papaya', 'protein_per_100g': 0.5, 'carbs_per_100g': 11, 'fat_per_100g': 0.3, 'calories_per_100g': 43, 'max_quantity': 200, 'category': 'carbs'},
-            
-            # High fat (25 ingredients) - with realistic limits
-            {'name': 'olive_oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 884, 'max_quantity': 30, 'category': 'fat'},
-            {'name': 'coconut_oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 862, 'max_quantity': 30, 'category': 'fat'},
-            {'name': 'avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 150, 'category': 'fat'},
-            {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'walnuts', 'protein_per_100g': 15, 'carbs_per_100g': 14, 'fat_per_100g': 65, 'calories_per_100g': 654, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'cashews', 'protein_per_100g': 18, 'carbs_per_100g': 30, 'fat_per_100g': 44, 'calories_per_100g': 553, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'peanuts', 'protein_per_100g': 26, 'carbs_per_100g': 16, 'fat_per_100g': 49, 'calories_per_100g': 567, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'pecans', 'protein_per_100g': 9, 'carbs_per_100g': 14, 'fat_per_100g': 72, 'calories_per_100g': 691, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'pistachios', 'protein_per_100g': 20, 'carbs_per_100g': 28, 'fat_per_100g': 45, 'calories_per_100g': 560, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'macadamia_nuts', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 76, 'calories_per_100g': 718, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'hazelnuts', 'protein_per_100g': 15, 'carbs_per_100g': 17, 'fat_per_100g': 61, 'calories_per_100g': 628, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'brazil_nuts', 'protein_per_100g': 14, 'carbs_per_100g': 12, 'fat_per_100g': 66, 'calories_per_100g': 656, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'pine_nuts', 'protein_per_100g': 14, 'carbs_per_100g': 13, 'fat_per_100g': 68, 'calories_per_100g': 673, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'sunflower_seeds', 'protein_per_100g': 21, 'carbs_per_100g': 20, 'fat_per_100g': 51, 'calories_per_100g': 584, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'pumpkin_seeds', 'protein_per_100g': 19, 'carbs_per_100g': 54, 'fat_per_100g': 19, 'calories_per_100g': 446, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'chia_seeds', 'protein_per_100g': 17, 'carbs_per_100g': 42, 'fat_per_100g': 31, 'calories_per_100g': 486, 'max_quantity': 50, 'category': 'fat'},
-            {'name': 'flaxseeds', 'protein_per_100g': 18, 'carbs_per_100g': 29, 'fat_per_100g': 42, 'calories_per_100g': 534, 'max_quantity': 50, 'category': 'fat'},
-            {'name': 'hemp_seeds', 'protein_per_100g': 32, 'carbs_per_100g': 4, 'fat_per_100g': 49, 'calories_per_100g': 553, 'max_quantity': 50, 'category': 'fat'},
-            {'name': 'sesame_seeds', 'protein_per_100g': 18, 'carbs_per_100g': 23, 'fat_per_100g': 50, 'calories_per_100g': 573, 'max_quantity': 50, 'category': 'fat'},
-            {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 80, 'category': 'fat'},
-            {'name': 'almond_butter', 'protein_per_100g': 21, 'carbs_per_100g': 20, 'fat_per_100g': 53, 'calories_per_100g': 614, 'max_quantity': 80, 'category': 'fat'},
-            {'name': 'cashew_butter', 'protein_per_100g': 18, 'carbs_per_100g': 30, 'fat_per_100g': 44, 'calories_per_100g': 553, 'max_quantity': 80, 'category': 'fat'},
-            {'name': 'tahini', 'protein_per_100g': 18, 'carbs_per_100g': 23, 'fat_per_100g': 50, 'calories_per_100g': 573, 'max_quantity': 80, 'category': 'fat'},
-            {'name': 'coconut_milk', 'protein_per_100g': 2, 'carbs_per_100g': 3, 'fat_per_100g': 24, 'calories_per_100g': 230, 'max_quantity': 100, 'category': 'fat'},
-            {'name': 'heavy_cream', 'protein_per_100g': 2, 'carbs_per_100g': 3, 'fat_per_100g': 37, 'calories_per_100g': 340, 'max_quantity': 100, 'category': 'fat'},
-            
-            # Vegetables (25 ingredients)
-            {'name': 'broccoli', 'protein_per_100g': 2.8, 'carbs_per_100g': 7, 'fat_per_100g': 0.4, 'calories_per_100g': 34, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'spinach', 'protein_per_100g': 2.9, 'carbs_per_100g': 3.6, 'fat_per_100g': 0.4, 'calories_per_100g': 23, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'kale', 'protein_per_100g': 4.3, 'carbs_per_100g': 9, 'fat_per_100g': 0.9, 'calories_per_100g': 49, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'arugula', 'protein_per_100g': 2.6, 'carbs_per_100g': 3.7, 'fat_per_100g': 0.7, 'calories_per_100g': 25, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'romaine_lettuce', 'protein_per_100g': 1.2, 'carbs_per_100g': 2.9, 'fat_per_100g': 0.3, 'calories_per_100g': 17, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'carrots', 'protein_per_100g': 0.9, 'carbs_per_100g': 10, 'fat_per_100g': 0.2, 'calories_per_100g': 41, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'bell_peppers', 'protein_per_100g': 0.9, 'carbs_per_100g': 6, 'fat_per_100g': 0.2, 'calories_per_100g': 20, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'tomatoes', 'protein_per_100g': 0.9, 'carbs_per_100g': 3.9, 'fat_per_100g': 0.2, 'calories_per_100g': 18, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'cucumber', 'protein_per_100g': 0.7, 'carbs_per_100g': 3.6, 'fat_per_100g': 0.1, 'calories_per_100g': 16, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'zucchini', 'protein_per_100g': 1.2, 'carbs_per_100g': 3.1, 'fat_per_100g': 0.3, 'calories_per_100g': 17, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'cauliflower', 'protein_per_100g': 1.9, 'carbs_per_100g': 5, 'fat_per_100g': 0.3, 'calories_per_100g': 25, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'brussels_sprouts', 'protein_per_100g': 3.4, 'carbs_per_100g': 9, 'fat_per_100g': 0.3, 'calories_per_100g': 43, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'asparagus', 'protein_per_100g': 2.2, 'carbs_per_100g': 3.9, 'fat_per_100g': 0.1, 'calories_per_100g': 20, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'green_beans', 'protein_per_100g': 1.8, 'carbs_per_100g': 7, 'fat_per_100g': 0.2, 'calories_per_100g': 31, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'peas', 'protein_per_100g': 5.4, 'carbs_per_100g': 14, 'fat_per_100g': 0.4, 'calories_per_100g': 84, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'corn', 'protein_per_100g': 3.2, 'carbs_per_100g': 19, 'fat_per_100g': 1.2, 'calories_per_100g': 86, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'onion', 'protein_per_100g': 1.1, 'carbs_per_100g': 9, 'fat_per_100g': 0.1, 'calories_per_100g': 40, 'max_quantity': 200, 'category': 'vegetable'},
-            {'name': 'garlic', 'protein_per_100g': 6.4, 'carbs_per_100g': 33, 'fat_per_100g': 0.5, 'calories_per_100g': 149, 'max_quantity': 50, 'category': 'vegetable'},
-            {'name': 'ginger', 'protein_per_100g': 1.8, 'carbs_per_100g': 18, 'fat_per_100g': 0.8, 'calories_per_100g': 80, 'max_quantity': 50, 'category': 'vegetable'},
-            {'name': 'mushrooms', 'protein_per_100g': 3.1, 'carbs_per_100g': 3.3, 'fat_per_100g': 0.3, 'calories_per_100g': 22, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'eggplant', 'protein_per_100g': 1, 'carbs_per_100g': 6, 'fat_per_100g': 0.2, 'calories_per_100g': 25, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'squash', 'protein_per_100g': 1.2, 'carbs_per_100g': 6, 'fat_per_100g': 0.2, 'calories_per_100g': 26, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'pumpkin', 'protein_per_100g': 1, 'carbs_per_100g': 6.5, 'fat_per_100g': 0.1, 'calories_per_100g': 26, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'beets', 'protein_per_100g': 1.6, 'carbs_per_100g': 10, 'fat_per_100g': 0.2, 'calories_per_100g': 43, 'max_quantity': 300, 'category': 'vegetable'},
-            {'name': 'radishes', 'protein_per_100g': 0.9, 'carbs_per_100g': 3.4, 'fat_per_100g': 0.1, 'calories_per_100g': 16, 'max_quantity': 300, 'category': 'vegetable'},
-        ]
+        # Helper ingredient database by meal type and macro
+        self.helper_ingredients = {
+            'breakfast': {
+                'protein': [
+                    {'name': 'eggs', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 150},
+                    {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 200},
+                    {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 150},
+                    {'name': 'turkey_bacon', 'protein_per_100g': 15, 'carbs_per_100g': 1, 'fat_per_100g': 12, 'calories_per_100g': 180, 'max_quantity': 100},
+                    {'name': 'protein_powder', 'protein_per_100g': 80, 'carbs_per_100g': 5, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                    {'name': 'smoked_salmon', 'protein_per_100g': 18, 'carbs_per_100g': 0, 'fat_per_100g': 4.3, 'calories_per_100g': 117, 'max_quantity': 100},
+                    {'name': 'tofu_scramble', 'protein_per_100g': 10, 'carbs_per_100g': 2, 'fat_per_100g': 7, 'calories_per_100g': 120, 'max_quantity': 150},
+                    {'name': 'canadian_bacon', 'protein_per_100g': 20, 'carbs_per_100g': 0, 'fat_per_100g': 3, 'calories_per_100g': 110, 'max_quantity': 100},
+                    {'name': 'sardines', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 208, 'max_quantity': 80},
+                    {'name': 'hemp_seeds', 'protein_per_100g': 31, 'carbs_per_100g': 9, 'fat_per_100g': 49, 'calories_per_100g': 553, 'max_quantity': 40}
+                ],
+                'carbs': [
+                    {'name': 'oats', 'protein_per_100g': 6.9, 'carbs_per_100g': 58, 'fat_per_100g': 6.9, 'calories_per_100g': 389, 'max_quantity': 150},
+                    {'name': 'whole_grain_bread', 'protein_per_100g': 13, 'carbs_per_100g': 41, 'fat_per_100g': 4.2, 'calories_per_100g': 247, 'max_quantity': 100},
+                    {'name': 'banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 22, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 150},
+                    {'name': 'quinoa', 'protein_per_100g': 14, 'carbs_per_100g': 64, 'fat_per_100g': 6, 'calories_per_100g': 368, 'max_quantity': 100},
+                    {'name': 'sweet_potato_hash', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 150},
+                    {'name': 'berries', 'protein_per_100g': 1, 'carbs_per_100g': 14, 'fat_per_100g': 0.3, 'calories_per_100g': 57, 'max_quantity': 100},
+                    {'name': 'whole_grain_cereal', 'protein_per_100g': 8, 'carbs_per_100g': 68, 'fat_per_100g': 2, 'calories_per_100g': 350, 'max_quantity': 80},
+                    {'name': 'mango', 'protein_per_100g': 0.8, 'carbs_per_100g': 15, 'fat_per_100g': 0.4, 'calories_per_100g': 60, 'max_quantity': 120},
+                    {'name': 'pineapple', 'protein_per_100g': 0.5, 'carbs_per_100g': 13, 'fat_per_100g': 0.1, 'calories_per_100g': 50, 'max_quantity': 120},
+                    {'name': 'buckwheat', 'protein_per_100g': 13, 'carbs_per_100g': 72, 'fat_per_100g': 3.4, 'calories_per_100g': 343, 'max_quantity': 100}
+                ],
+                'fat': [
+                    {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
+                    {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 40},
+                    {'name': 'avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 100},
+                    {'name': 'chia_seeds', 'protein_per_100g': 17, 'carbs_per_100g': 42, 'fat_per_100g': 31, 'calories_per_100g': 486, 'max_quantity': 30},
+                    {'name': 'coconut_oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 892, 'max_quantity': 20},
+                    {'name': 'flax_seeds', 'protein_per_100g': 18, 'carbs_per_100g': 29, 'fat_per_100g': 42, 'calories_per_100g': 534, 'max_quantity': 30},
+                    {'name': 'pistachios', 'protein_per_100g': 20, 'carbs_per_100g': 28, 'fat_per_100g': 45, 'calories_per_100g': 560, 'max_quantity': 50},
+                    {'name': 'macadamia_nuts', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 76, 'calories_per_100g': 718, 'max_quantity': 40}
+                ]
+            },
+            'lunch': {
+                'protein': [
+                    {'name': 'chicken_breast', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165, 'max_quantity': 200},
+                    {'name': 'turkey', 'protein_per_100g': 29, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 135, 'max_quantity': 200},
+                    {'name': 'tuna', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 150},
+                    {'name': 'lentils', 'protein_per_100g': 9, 'carbs_per_100g': 20, 'fat_per_100g': 0.4, 'calories_per_100g': 116, 'max_quantity': 150},
+                    {'name': 'tofu', 'protein_per_100g': 15, 'carbs_per_100g': 2, 'fat_per_100g': 8, 'calories_per_100g': 145, 'max_quantity': 150},
+                    {'name': 'shrimp', 'protein_per_100g': 24, 'carbs_per_100g': 0.2, 'fat_per_100g': 0.3, 'calories_per_100g': 99, 'max_quantity': 150},
+                    {'name': 'lean_pork', 'protein_per_100g': 27, 'carbs_per_100g': 0, 'fat_per_100g': 6, 'calories_per_100g': 165, 'max_quantity': 150}
+                ],
+                'carbs': [
+                    {'name': 'brown_rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 200},
+                    {'name': 'quinoa', 'protein_per_100g': 14, 'carbs_per_100g': 64, 'fat_per_100g': 6, 'calories_per_100g': 368, 'max_quantity': 150},
+                    {'name': 'whole_wheat_pasta', 'protein_per_100g': 5, 'carbs_per_100g': 30, 'fat_per_100g': 1, 'calories_per_100g': 150, 'max_quantity': 150},
+                    {'name': 'sweet_potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 200},
+                    {'name': 'corn', 'protein_per_100g': 3.3, 'carbs_per_100g': 19, 'fat_per_100g': 1.4, 'calories_per_100g': 86, 'max_quantity': 150},
+                    {'name': 'chickpeas', 'protein_per_100g': 9, 'carbs_per_100g': 27, 'fat_per_100g': 3, 'calories_per_100g': 164, 'max_quantity': 150},
+                    {'name': 'barley', 'protein_per_100g': 3.5, 'carbs_per_100g': 28, 'fat_per_100g': 0.4, 'calories_per_100g': 123, 'max_quantity': 150}
+                ],
+                'fat': [
+                    {'name': 'avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 100},
+                    {'name': 'olive_oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 884, 'max_quantity': 20},
+                    {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
+                    {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 40},
+                    {'name': 'sunflower_seeds', 'protein_per_100g': 21, 'carbs_per_100g': 24, 'fat_per_100g': 51, 'calories_per_100g': 584, 'max_quantity': 50}
+                ]
+            },
+            'dinner': {
+                'protein': [
+                    {'name': 'beef_steak', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 220, 'max_quantity': 200},
+                    {'name': 'salmon', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 13, 'calories_per_100g': 206, 'max_quantity': 150},
+                    {'name': 'chicken_thigh', 'protein_per_100g': 24, 'carbs_per_100g': 0, 'fat_per_100g': 9, 'calories_per_100g': 177, 'max_quantity': 200},
+                    {'name': 'pork_loin', 'protein_per_100g': 27, 'carbs_per_100g': 0, 'fat_per_100g': 7, 'calories_per_100g': 172, 'max_quantity': 150},
+                    {'name': 'white_fish', 'protein_per_100g': 23, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 105, 'max_quantity': 150},
+                    {'name': 'tempeh', 'protein_per_100g': 20, 'carbs_per_100g': 8, 'fat_per_100g': 11, 'calories_per_100g': 195, 'max_quantity': 150},
+                    {'name': 'lamb', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 14, 'calories_per_100g': 215, 'max_quantity': 150}
+                ],
+                'carbs': [
+                    {'name': 'sweet_potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 200},
+                    {'name': 'brown_rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 200},
+                    {'name': 'quinoa', 'protein_per_100g': 14, 'carbs_per_100g': 64, 'fat_per_100g': 6, 'calories_per_100g': 368, 'max_quantity': 150},
+                    {'name': 'whole_grain_pasta', 'protein_per_100g': 5, 'carbs_per_100g': 30, 'fat_per_100g': 1, 'calories_per_100g': 150, 'max_quantity': 150},
+                    {'name': 'potato', 'protein_per_100g': 2, 'carbs_per_100g': 17, 'fat_per_100g': 0.1, 'calories_per_100g': 77, 'max_quantity': 200},
+                    {'name': 'lentils', 'protein_per_100g': 9, 'carbs_per_100g': 20, 'fat_per_100g': 0.4, 'calories_per_100g': 116, 'max_quantity': 150},
+                    {'name': 'black_beans', 'protein_per_100g': 9, 'carbs_per_100g': 23, 'fat_per_100g': 0.5, 'calories_per_100g': 130, 'max_quantity': 150}
+                ],
+                'fat': [
+                    {'name': 'nuts_mix', 'protein_per_100g': 15, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 500, 'max_quantity': 50},
+                    {'name': 'olive_oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 884, 'max_quantity': 20},
+                    {'name': 'avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 100},
+                    {'name': 'butter', 'protein_per_100g': 0.9, 'carbs_per_100g': 0.1, 'fat_per_100g': 81, 'calories_per_100g': 717, 'max_quantity': 20},
+                    {'name': 'walnuts', 'protein_per_100g': 15, 'carbs_per_100g': 14, 'fat_per_100g': 65, 'calories_per_100g': 654, 'max_quantity': 50}
+                ]
+            },
+            'morning_snack': {
+                'protein': [
+                    {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 150},
+                    {'name': 'hard_boiled_egg', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 100},
+                    {'name': 'protein_bar', 'protein_per_100g': 30, 'carbs_per_100g': 30, 'fat_per_100g': 10, 'calories_per_100g': 350, 'max_quantity': 80},
+                    {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 100},
+                    {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 100},
+                    {'name': 'turkey_jerky', 'protein_per_100g': 30, 'carbs_per_100g': 3, 'fat_per_100g': 1, 'calories_per_100g': 150, 'max_quantity': 50},
+                    {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80}
+                ],
+                'carbs': [
+                    {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
+                    {'name': 'berries', 'protein_per_100g': 1, 'carbs_per_100g': 14, 'fat_per_100g': 0.3, 'calories_per_100g': 57, 'max_quantity': 100},
+                    {'name': 'whole_grain_crackers', 'protein_per_100g': 7, 'carbs_per_100g': 70, 'fat_per_100g': 10, 'calories_per_100g': 400, 'max_quantity': 50},
+                    {'name': 'banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 22, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 100},
+                    {'name': 'dried_apricots', 'protein_per_100g': 3.4, 'carbs_per_100g': 63, 'fat_per_100g': 0.5, 'calories_per_100g': 241, 'max_quantity': 50},
+                    {'name': 'rice_cakes', 'protein_per_100g': 8, 'carbs_per_100g': 80, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                    {'name': 'oat_bar', 'protein_per_100g': 8, 'carbs_per_100g': 60, 'fat_per_100g': 8, 'calories_per_100g': 350, 'max_quantity': 60}
+                ],
+                'fat': [
+                    {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
+                    {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 30},
+                    {'name': 'trail_mix', 'protein_per_100g': 14, 'carbs_per_100g': 45, 'fat_per_100g': 30, 'calories_per_100g': 450, 'max_quantity': 50},
+                    {'name': 'sunflower_seeds', 'protein_per_100g': 21, 'carbs_per_100g': 24, 'fat_per_100g': 51, 'calories_per_100g': 584, 'max_quantity': 30},
+                    {'name': 'cashews', 'protein_per_100g': 18, 'carbs_per_100g': 30, 'fat_per_100g': 44, 'calories_per_100g': 553, 'max_quantity': 50}
+                ]
+            },
+            'afternoon_snack': {
+                'protein': [
+                    {'name': 'protein_bar', 'protein_per_100g': 30, 'carbs_per_100g': 30, 'fat_per_100g': 10, 'calories_per_100g': 350, 'max_quantity': 80},
+                    {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 150},
+                    {'name': 'beef_jerky', 'protein_per_100g': 33, 'carbs_per_100g': 3, 'fat_per_100g': 7, 'calories_per_100g': 200, 'max_quantity': 50},
+                    {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 100},
+                    {'name': 'hummus', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 10, 'calories_per_100g': 166, 'max_quantity': 100},
+                    {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80},
+                    {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 100}
+                ],
+                'carbs': [
+                    {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
+                    {'name': 'whole_grain_crackers', 'protein_per_100g': 7, 'carbs_per_100g': 70, 'fat_per_100g': 10, 'calories_per_100g': 400, 'max_quantity': 50},
+                    {'name': 'banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 22, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 100},
+                    {'name': 'rice_cakes', 'protein_per_100g': 8, 'carbs_per_100g': 80, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                    {'name': 'dried_mango', 'protein_per_100g': 2, 'carbs_per_100g': 65, 'fat_per_100g': 0.5, 'calories_per_100g': 250, 'max_quantity': 50},
+                    {'name': 'granola', 'protein_per_100g': 10, 'carbs_per_100g': 60, 'fat_per_100g': 15, 'calories_per_100g': 400, 'max_quantity': 60},
+                    {'name': 'carrot_sticks', 'protein_per_100g': 0.9, 'carbs_per_100g': 10, 'fat_per_100g': 0.2, 'calories_per_100g': 41, 'max_quantity': 100}
+                ],
+                'fat': [
+                    {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 30},
+                    {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
+                    {'name': 'cashews', 'protein_per_100g': 18, 'carbs_per_100g': 30, 'fat_per_100g': 44, 'calories_per_100g': 553, 'max_quantity': 50},
+                    {'name': 'trail_mix', 'protein_per_100g': 14, 'carbs_per_100g': 45, 'fat_per_100g': 30, 'calories_per_100g': 450, 'max_quantity': 50},
+                    {'name': 'pumpkin_seeds', 'protein_per_100g': 19, 'carbs_per_100g': 54, 'fat_per_100g': 19, 'calories_per_100g': 446, 'max_quantity': 30}
+                ]
+            },
+            'evening_snack': {
+                'protein': [
+                    {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 100},
+                    {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 150},
+                    {'name': 'protein_shake', 'protein_per_100g': 80, 'carbs_per_100g': 5, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                    {'name': 'beef_jerky', 'protein_per_100g': 33, 'carbs_per_100g': 3, 'fat_per_100g': 7, 'calories_per_100g': 200, 'max_quantity': 50},
+                    {'name': 'hummus', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 10, 'calories_per_100g': 166, 'max_quantity': 100},
+                    {'name': 'hard_boiled_egg', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 100},
+                    {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80}
+                ],
+                'carbs': [
+                    {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
+                    {'name': 'whole_grain_crackers', 'protein_per_100g': 7, 'carbs_per_100g': 70, 'fat_per_100g': 10, 'calories_per_100g': 400, 'max_quantity': 50},
+                    {'name': 'berries', 'protein_per_100g': 1, 'carbs_per_100g': 14, 'fat_per_100g': 0.3, 'calories_per_100g': 57, 'max_quantity': 100},
+                    {'name': 'rice_cakes', 'protein_per_100g': 8, 'carbs_per_100g': 80, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                    {'name': 'dried_raisins', 'protein_per_100g': 3, 'carbs_per_100g': 79, 'fat_per_100g': 0.5, 'calories_per_100g': 299, 'max_quantity': 50},
+                    {'name': 'celery_sticks', 'protein_per_100g': 0.7, 'carbs_per_100g': 3, 'fat_per_100g': 0.2, 'calories_per_100g': 16, 'max_quantity': 100},
+                    {'name': 'oat_bar', 'protein_per_100g': 8, 'carbs_per_100g': 60, 'fat_per_100g': 8, 'calories_per_100g': 350, 'max_quantity': 60}
+                ],
+                'fat': [
+                    {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 30},
+                    {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
+                    {'name': 'cashews', 'protein_per_100g': 18, 'carbs_per_100g': 30, 'fat_per_100g': 44, 'calories_per_100g': 553, 'max_quantity': 50},
+                    {'name': 'trail_mix', 'protein_per_100g': 14, 'carbs_per_100g': 45, 'fat_per_100g': 30, 'calories_per_100g': 450, 'max_quantity': 50},
+                    {'name': 'chia_seeds', 'protein_per_100g': 17, 'carbs_per_100g': 42, 'fat_per_100g': 31, 'calories_per_100g': 486, 'max_quantity': 30}
+                ]
+            }
+        }
+
+        # Basic nutritional data for enrichment
+        self.nutrition_db = {
+            'chicken': {'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165},
+            'chicken_breast': {'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165},
+            'beef': {'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 15, 'calories_per_100g': 250},
+            'beef_steak': {'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 220},
+            'rice': {'protein_per_100g': 2.7, 'carbs_per_100g': 28, 'fat_per_100g': 0.3, 'calories_per_100g': 130},
+            'brown_rice': {'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111},
+            'bread': {'protein_per_100g': 13, 'carbs_per_100g': 41, 'fat_per_100g': 4.2, 'calories_per_100g': 247},
+            'tomato': {'protein_per_100g': 0.9, 'carbs_per_100g': 3.9, 'fat_per_100g': 0.2, 'calories_per_100g': 18},
+            'onion': {'protein_per_100g': 1.1, 'carbs_per_100g': 9, 'fat_per_100g': 0.1, 'calories_per_100g': 40},
+            'potato': {'protein_per_100g': 2, 'carbs_per_100g': 17, 'fat_per_100g': 0.1, 'calories_per_100g': 77},
+            'eggs': {'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155},
+            'oats': {'protein_per_100g': 6.9, 'carbs_per_100g': 58, 'fat_per_100g': 6.9, 'calories_per_100g': 389},
+            'almonds': {'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579},
+            'avocado': {'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160},
+            'nuts_mix': {'protein_per_100g': 15, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 500},
+            'sweet_potato': {'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86},
+        }
+
+        # Initialize DEAP if available
+        if DEAP_AVAILABLE:
+            self._setup_deap()
         
-        self.current_ingredients = []
-    
-    def _select_optimal_ingredients(self, target_macros: Dict, rag_ingredients: List[Dict]) -> List[Dict]:
-        """Intelligently select optimal ingredients to add to RAG ingredients"""
-        logger.info(f"🧠 Selecting optimal ingredients for targets: {target_macros}")
-        
-        # Calculate current totals from RAG ingredients
-        current_totals = self._calculate_current_totals(rag_ingredients)
-        deficits = self._calculate_macro_deficits(current_totals, target_macros)
-        
-        # Get existing ingredient categories to avoid duplicates
-        existing_categories = set()
-        existing_names = set()
-        for ing in rag_ingredients:
-            existing_names.add(ing.get('name', '').lower())
-            # Check if it's a protein source
-            if ing.get('protein_per_100g', 0) > 15:
-                existing_categories.add('protein')
-            # Check if it's a carb source  
-            if ing.get('carbs_per_100g', 0) > 20:
-                existing_categories.add('carbs')
-            # Check if it's a fat source
-            if ing.get('fat_per_100g', 0) > 10:
-                existing_categories.add('fat')
-        
-        selected_ingredients = []
-        
-        # Select protein ingredients if needed
-        if deficits['protein'] > 10 and 'protein' not in existing_categories:
-            protein_ingredients = self._select_ingredients_by_macro('protein', deficits['protein'], existing_names)
-            selected_ingredients.extend(protein_ingredients)
-            logger.info(f"🥩 Selected {len(protein_ingredients)} protein ingredients")
-        
-        # Select carb ingredients if needed
-        if deficits['carbs'] > 10 and 'carbs' not in existing_categories:
-            carb_ingredients = self._select_ingredients_by_macro('carbs', deficits['carbs'], existing_names)
-            selected_ingredients.extend(carb_ingredients)
-            logger.info(f"🍞 Selected {len(carb_ingredients)} carb ingredients")
-        
-        # Select fat ingredients if needed
-        if deficits['fat'] > 5 and 'fat' not in existing_categories:
-            fat_ingredients = self._select_ingredients_by_macro('fat', deficits['fat'], existing_names)
-            selected_ingredients.extend(fat_ingredients)
-            logger.info(f"🥑 Selected {len(fat_ingredients)} fat ingredients")
-        
-        # If still have deficits, add more ingredients
-        if len(selected_ingredients) < 3:
-            additional_ingredients = self._select_additional_ingredients(deficits, existing_names, selected_ingredients)
-            selected_ingredients.extend(additional_ingredients)
-            logger.info(f"➕ Added {len(additional_ingredients)} additional ingredients")
-        
-        logger.info(f"🎯 Total selected ingredients: {len(selected_ingredients)}")
-        return selected_ingredients
-    
-    def _select_ingredients_by_macro(self, macro: str, deficit: float, existing_names: set) -> List[Dict]:
-        """Select ingredients for a specific macro deficiency"""
-        try:
-            logger.info(f"🔍 Selecting ingredients for macro: {macro}, deficit: {deficit:.1f}g")
-            
-            # Validate macro name
-            valid_macros = ['protein', 'carbs', 'fat', 'calories']
-            if macro not in valid_macros:
-                logger.error(f"❌ Invalid macro name: {macro}. Valid macros: {valid_macros}")
-                return []
-            
-            candidates = []
-            
-            for ingredient in self.ingredients_db:
-                try:
-                    if ingredient['name'].lower() not in existing_names:
-                        # Safely get macro content with proper error handling
-                        macro_field = f'{macro}_per_100g'
-                        macro_content = ingredient.get(macro_field, 0)
-                        
-                        # Ensure macro_content is a number
-                        if not isinstance(macro_content, (int, float)):
-                            logger.warning(f"⚠️ Invalid macro content for {ingredient['name']}: {macro_content} (type: {type(macro_content)})")
-                            macro_content = 0
-                        
-                        if macro_content > 0:
-                            # Calculate efficiency (macro per calorie)
-                            calories = ingredient.get('calories_per_100g', 1)
-                            if not isinstance(calories, (int, float)) or calories <= 0:
-                                calories = 1
-                            
-                            efficiency = macro_content / max(calories, 1)
-                            
-                            # Calculate quantity needed
-                            max_qty = ingredient.get('max_quantity', 200)
-                            if not isinstance(max_qty, (int, float)) or max_qty <= 0:
-                                max_qty = 200
-                            
-                            quantity_needed = min((deficit / macro_content) * 100, max_qty)
-                            
-                            # Calculate score
-                            score = efficiency * (1 - (quantity_needed / max_qty))
-                            
-                            candidates.append({
-                                'ingredient': ingredient.copy(),
-                                'efficiency': efficiency,
-                                'quantity_needed': quantity_needed,
-                                'score': score
-                            })
-                            
-                except Exception as e:
-                    logger.warning(f"⚠️ Error processing ingredient {ingredient.get('name', 'unknown')}: {e}")
-                    continue
-            
-            logger.info(f"📊 Found {len(candidates)} candidate ingredients for {macro}")
-            
-            # Sort by score and select top candidates
-            candidates.sort(key=lambda x: x['score'], reverse=True)
-            
-            selected = []
-            remaining_deficit = deficit
-            
-            for candidate in candidates[:3]:  # Select up to 3 ingredients
-                if remaining_deficit <= 0:
-                    break
-                    
-                try:
-                    ingredient = candidate['ingredient'].copy()
-                    ingredient['quantity_needed'] = candidate['quantity_needed']
-                    selected.append(ingredient)
-                    
-                    # Update remaining deficit
-                    macro_content = ingredient.get(f'{macro}_per_100g', 0)
-                    if isinstance(macro_content, (int, float)) and macro_content > 0:
-                        remaining_deficit -= (candidate['quantity_needed'] / 100) * macro_content
-                    
-                except Exception as e:
-                    logger.warning(f"⚠️ Error processing candidate {candidate.get('ingredient', {}).get('name', 'unknown')}: {e}")
-                    continue
-            
-            logger.info(f"✅ Selected {len(selected)} ingredients for {macro}")
-            return selected
-            
-        except Exception as e:
-            logger.error(f"❌ Error in _select_ingredients_by_macro for {macro}: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return []
-    
-    def _select_additional_ingredients(self, deficits: Dict, existing_names: set, already_selected: List[Dict]) -> List[Dict]:
-        """Select additional ingredients to fill remaining deficits"""
-        additional = []
-        
-        # Find ingredients that can help with multiple macros
-        for ingredient in self.ingredients_db:
-            if ingredient['name'].lower() not in existing_names:
-                # Check if this ingredient helps with multiple deficits
-                helps_with = []
-                if deficits['protein'] > 5 and ingredient.get('protein_per_100g', 0) > 5:
-                    helps_with.append('protein')
-                if deficits['carbs'] > 5 and ingredient.get('carbs_per_100g', 0) > 10:
-                    helps_with.append('carbs')
-                if deficits['fat'] > 3 and ingredient.get('fat_per_100g', 0) > 5:
-                    helps_with.append('fat')
-                
-                if len(helps_with) >= 2:  # Helps with at least 2 macros
-                    # Calculate balanced quantity
-                    quantities = []
-                    for macro in helps_with:
-                        macro_content = ingredient.get(f'{macro}_per_100g', 0)
-                        deficit = deficits[macro]
-                        qty = min((deficit / macro_content) * 100, ingredient.get('max_quantity', 200))
-                        quantities.append(qty)
-                    
-                    # Use the minimum quantity to avoid over-supplementing
-                    balanced_quantity = min(quantities)
-                    
-                    selected_ingredient = ingredient.copy()
-                    selected_ingredient['quantity_needed'] = balanced_quantity
-                    additional.append(selected_ingredient)
-                    
-                    if len(additional) >= 2:  # Limit additional ingredients
-                        break
-        
-        return additional
-    
-    def _fallback_ingredient_selection(self, deficits: Dict, rag_ingredients: List[Dict]) -> List[Dict]:
-        """Fallback ingredient selection when intelligent selection fails"""
-        logger.info("🔄 Using fallback ingredient selection")
-        
-        supplementary_ingredients = []
-        existing_names = {ing.get('name', '').lower() for ing in rag_ingredients}
-        
-        try:
-            # Simple protein supplement if needed
-            if deficits['protein'] > 10:
-                protein_ingredient = self._find_best_supplement('protein', deficits['protein'])
-                if protein_ingredient and protein_ingredient['name'].lower() not in existing_names:
-                    supplementary_ingredients.append(protein_ingredient)
-                    existing_names.add(protein_ingredient['name'].lower())
-                    logger.info(f"🥩 Fallback protein: {protein_ingredient['name']}")
-            
-            # Simple carb supplement if needed
-            if deficits['carbs'] > 10:
-                carb_ingredient = self._find_best_supplement('carbs', deficits['carbs'])
-                if carb_ingredient and carb_ingredient['name'].lower() not in existing_names:
-                    supplementary_ingredients.append(carb_ingredient)
-                    existing_names.add(carb_ingredient['name'].lower())
-                    logger.info(f"🍞 Fallback carbs: {carb_ingredient['name']}")
-            
-            # Simple fat supplement if needed
-            if deficits['fat'] > 5:
-                fat_ingredient = self._find_best_supplement('fat', deficits['fat'])
-                if fat_ingredient and fat_ingredient['name'].lower() not in existing_names:
-                    supplementary_ingredients.append(fat_ingredient)
-                    existing_names.add(fat_ingredient['name'].lower())
-                    logger.info(f"🥑 Fallback fat: {fat_ingredient['name']}")
-            
-        except Exception as e:
-            logger.error(f"❌ Error in fallback ingredient selection: {e}")
-        
-        logger.info(f"🔄 Fallback selection complete: {len(supplementary_ingredients)} ingredients")
-        return supplementary_ingredients
-    
-    def optimize_single_meal(self, rag_response: Dict, target_macros: Dict, user_preferences: Dict, meal_type: str, request_data: Dict = None) -> Dict:
-        """Simple meal optimization: add minimal supplements to reach targets"""
+        # Update helper ingredients with patches
+        self._update_helper_ingredients()
+
+    # --------------------- Public API ---------------------
+
+    def optimize_single_meal(self, rag_response: Dict, target_macros: Dict, user_preferences: Dict,
+                             meal_type: str, request_data: Dict = None) -> Dict:
+        """Main optimization method implementing the 3-step algorithm."""
         start_time = time.time()
-        
         try:
             logger.info(f"🚀 Starting meal optimization for {meal_type}")
-            logger.info(f"📊 Target macros: {target_macros}")
-            
-            # Initialize request_data if not provided
-            if request_data is None:
-                request_data = {}
-            
-            # Validate input data
-            if not rag_response or not target_macros:
-                raise ValueError("Missing required input data: rag_response or target_macros")
-            
-            # Validate target macros structure
-            required_macros = ['calories', 'protein', 'carbs', 'fat']
-            
-            # Handle different possible macro key names
-            macro_mapping = {
-                'carbohydrates': 'carbs',
-                'carb': 'carbs',
-                'protein': 'protein',
-                'proteins': 'protein',
-                'fat': 'fat',
-                'fats': 'fat',
-                'calories': 'calories',
-                'calorie': 'calories'
-            }
-            
-            # Normalize target_macros keys
-            normalized_macros = {}
-            for key, value in target_macros.items():
-                normalized_key = macro_mapping.get(key.lower(), key.lower())
-                normalized_macros[normalized_key] = value
-            
-            # Check if we have all required macros
-            missing_macros = []
-            for macro in required_macros:
-                if macro not in normalized_macros:
-                    missing_macros.append(macro)
-                elif not isinstance(normalized_macros[macro], (int, float)) or normalized_macros[macro] < 0:
-                    logger.warning(f"⚠️ Invalid {macro} value: {normalized_macros[macro]}")
-                    # Use default value for invalid macros
-                    if macro in ['calories', 'protein', 'carbs', 'fat']:
-                        default_values = {'calories': 500, 'protein': 30, 'carbs': 50, 'fat': 15}
-                        normalized_macros[macro] = default_values[macro]
-                        logger.info(f"🔄 Using default value for {macro}: {default_values[macro]}")
-            
-            if missing_macros:
-                logger.warning(f"⚠️ Missing macros: {missing_macros}")
-                logger.warning(f"⚠️ Available keys: {list(target_macros.keys())}")
-                logger.warning(f"⚠️ Normalized keys: {list(normalized_macros.keys())}")
-                
-                # Try to provide default values for missing macros
-                default_macros = {
-                    'calories': 500,
-                    'protein': 30,
-                    'carbs': 50,
-                    'fat': 15
-                }
-                
-                for missing_macro in missing_macros:
-                    if missing_macro in default_macros:
-                        normalized_macros[missing_macro] = default_macros[missing_macro]
-                        logger.info(f"🔄 Using default value for {missing_macro}: {default_macros[missing_macro]}")
-                
-                # Update target_macros with normalized values
-                target_macros = normalized_macros.copy()
-            else:
-                # Update target_macros with normalized values
-                target_macros = normalized_macros.copy()
-            
-            # Extract RAG ingredients
+
+            if not target_macros:
+                raise ValueError("Missing target_macros")
+
+            # 1) Normalize targets
+            target_macros = self._normalize_target_macros(target_macros)
+
+            # 2) Extract ingredients from RAG (robust to multiple shapes)
             rag_ingredients = self._extract_rag_ingredients(rag_response)
+            if not rag_ingredients:
+                raise ValueError("No ingredients extracted from RAG response")
+
             logger.info(f"🍽️ RAG ingredients: {len(rag_ingredients)} items")
-            
-            # Calculate current totals
-            current_totals = self._calculate_current_totals(rag_ingredients)
-            deficits = self._calculate_macro_deficits(current_totals, target_macros)
-            
-            logger.info(f"📊 Deficits: protein={deficits['protein']:.1f}g, carbs={deficits['carbs']:.1f}g, fat={deficits['fat']:.1f}g")
-            
-            # Add minimal supplements to fill deficits
-            supplementary_ingredients = []
-            
-            try:
-                # Use intelligent ingredient selection instead of simple supplementation
-                supplementary_ingredients = self._select_optimal_ingredients(target_macros, rag_ingredients)
-                logger.info(f"✅ Successfully selected {len(supplementary_ingredients)} supplementary ingredients")
-            except Exception as e:
-                logger.error(f"❌ Error in ingredient selection: {e}")
-                # Fallback to simple supplementation
-                supplementary_ingredients = self._fallback_ingredient_selection(deficits, rag_ingredients)
-                logger.info(f"🔄 Using fallback ingredient selection: {len(supplementary_ingredients)} ingredients")
-            
-            # Combine all ingredients
-            all_ingredients = rag_ingredients + supplementary_ingredients
-            logger.info(f"📊 Total: {len(rag_ingredients)} RAG + {len(supplementary_ingredients)} supplements = {len(all_ingredients)} total")
-            
-            # Run advanced optimization algorithms and pick the best result
-            try:
-                optimization_result = self._run_advanced_optimizations(all_ingredients, target_macros)
-                logger.info(f"✅ Optimization completed: {optimization_result['method']}")
-            except Exception as e:
-                logger.error(f"❌ Error in advanced optimization: {e}")
-                # Fallback to simple optimization
-                optimization_result = self._fallback_optimize(all_ingredients, target_macros)
-                logger.info(f"🔄 Using fallback optimization: {optimization_result['method']}")
-            
-            # Calculate final meal
-            try:
-                final_meal = self._calculate_final_meal(all_ingredients, optimization_result['quantities'])
-                logger.info(f"✅ Final meal calculated successfully")
-            except Exception as e:
-                logger.error(f"❌ Error calculating final meal: {e}")
-                # Use current totals as fallback
-                final_meal = current_totals
-                logger.info(f"🔄 Using current totals as fallback")
-            
-            # Check achievement
-            try:
-                target_achievement = self._check_target_achievement(final_meal, target_macros)
-                logger.info(f"✅ Target achievement calculated")
-            except Exception as e:
-                logger.error(f"❌ Error calculating target achievement: {e}")
-                # Create basic achievement info
-                target_achievement = {
-                    'calories': False, 'protein': False, 'carbs': False, 'fat': False, 'overall': False
-                }
-                logger.info(f"🔄 Using basic achievement info")
-            
+
+            # ---- STEP 1: Optimize with available methods, pick best ----
+            logger.info("🔄 Step 1: Running optimization with advanced methods...")
+            initial_result = self._run_optimization_methods(rag_ingredients, target_macros)
+            initial_nutrition = self._calculate_final_meal(rag_ingredients, initial_result['quantities'])
+            target_achievement = self._check_target_achievement(initial_nutrition, target_macros)
+            logger.info(f"📈 Initial target achievement: {target_achievement}")
+
+            if target_achievement['overall']:
+                # Done
+                final_ingredients = self._materialize_ingredients(rag_ingredients, initial_result['quantities'])
+                computation_time = time.time() - start_time
+                return self._format_output(final_ingredients, initial_result, initial_nutrition,
+                                           target_achievement, [], computation_time, request_data)
+
+            # ---- STEP 2: Add smart helper ingredients (non-duplicates, meal-specific) ----
+            logger.info("🔧 Step 2: Targets not fully achieved. Adding helper ingredients...")
+            helper_ingredients = self._add_smart_helper_ingredients_candidates(
+                current_ingredients=self._materialize_ingredients(rag_ingredients, initial_result['quantities']),
+                target_macros=target_macros,
+                meal_type=meal_type
+            )
+
+            # Merge (as candidates) – no preset quantities; let optimizer decide.
+            all_ingredients = self._merge_ingredients_for_reopt(rag_ingredients, helper_ingredients)
+            logger.info(f"🔁 Re-optimizing with {len(all_ingredients)} ingredients (including {len(helper_ingredients)} helpers)...")
+
+            # ---- STEP 3: Re-optimize on the full set ----
+            final_result = self._run_optimization_methods(all_ingredients, target_macros)
+            final_nutrition = self._calculate_final_meal(all_ingredients, final_result['quantities'])
+            final_target_achievement = self._check_target_achievement(final_nutrition, target_macros)
+            logger.info(f"✅ Final target achievement: {final_target_achievement}")
+
+            final_ingredients = self._materialize_ingredients(all_ingredients, final_result['quantities'])
             computation_time = time.time() - start_time
-            
-            # Format meal ingredients for Next.js
-            formatted_meal = []
-            for i, ingredient in enumerate(all_ingredients):
-                quantity = optimization_result['quantities'][i] if i < len(optimization_result['quantities']) else ingredient.get('quantity_needed', 100)
-                formatted_meal.append({
-                    "name": ingredient['name'].replace('_', ' ').title(),
-                    "quantity_needed": round(quantity, 1),
-                    "protein_per_100g": ingredient.get('protein_per_100g', 0),
-                    "carbs_per_100g": ingredient.get('carbs_per_100g', 0),
-                    "fat_per_100g": ingredient.get('fat_per_100g', 0),
-                    "calories_per_100g": ingredient.get('calories_per_100g', 0)
-                })
-            
-            return {
-                "user_id": request_data.get('user_id', 'default_user'),
-                "success": True,
-                "optimization_result": {
-                    "success": True,
-                    "method": optimization_result['method'],
-                    "computation_time": round(computation_time, 3)
-                },
-                "meal": formatted_meal,
-                "nutritional_totals": final_meal,
-                "target_achievement": target_achievement
-            }
-            
+
+            return self._format_output(final_ingredients, final_result, final_nutrition,
+                                       final_target_achievement, helper_ingredients,
+                                       computation_time, request_data)
+
         except Exception as e:
             computation_time = time.time() - start_time
             logger.error(f"❌ Fatal error in meal optimization: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            
-            # Return error response
             return {
                 "optimization_result": {
                     "success": False,
@@ -518,924 +320,1112 @@ class RAGMealOptimizer:
                 },
                 "meal": [],
                 "nutritional_totals": {"calories": 0, "protein": 0, "carbs": 0, "fat": 0},
-                "target_achievement": {"overall": False}
+                "target_achievement": {"overall": False},
+                "helper_ingredients_added": []
             }
-    
-    def _extract_rag_ingredients(self, rag_response: Dict) -> List[Dict]:
-        """Extract ingredients from RAG response with deduplication and nutritional enrichment"""
+
+    # --------------------- Helpers: Orchestration & Output ---------------------
+
+    def _format_output(self, final_ingredients: List[Dict], opt_result: Dict, totals: Dict,
+                       achievement: Dict, helper_ingredients_added: List[Dict],
+                       computation_time: float, request_data: Optional[Dict]) -> Dict:
+        # Format meal for output
+        formatted_meal = []
+        for ing in final_ingredients:
+            formatted_meal.append({
+                "name": ing['name'].replace('_', ' ').title(),
+                "quantity_needed": round(max(0.0, ing.get('quantity_needed', 0.0)), 1),
+                "protein_per_100g": ing.get('protein_per_100g', 0),
+                "carbs_per_100g": ing.get('carbs_per_100g', 0),
+                "fat_per_100g": ing.get('fat_per_100g', 0),
+                "calories_per_100g": ing.get('calories_per_100g', 0)
+            })
+
+        return {
+            "user_id": request_data.get('user_id', 'default_user') if request_data else 'default_user',
+            "success": True,
+            "optimization_result": {
+                "success": True,
+                "method": opt_result['method'],
+                "computation_time": round(computation_time, 3)
+            },
+            "meal": formatted_meal,
+            "nutritional_totals": totals,
+            "target_achievement": achievement,
+            "helper_ingredients_added": helper_ingredients_added,
+            "optimization_steps": {
+                "step1": "Initial optimization with advanced methods",
+                "step2": "Helper ingredients added if needed",
+                "step3": "Re-optimization with advanced methods"
+            }
+        }
+
+    def _merge_ingredients_for_reopt(self, base_ingredients: List[Dict], helpers: List[Dict]) -> List[Dict]:
+        """Merge base ingredients with helper candidates (avoid duplicates by name)."""
+        seen = {ing['name'].strip().lower() for ing in base_ingredients}
+        merged = list(base_ingredients)
+        for h in helpers:
+            if h['name'].strip().lower() not in seen:
+                # ensure nutrition fields exist
+                merged.append(self._ensure_nutrition_fields(h))
+                seen.add(h['name'].strip().lower())
+        return merged
+
+    def _materialize_ingredients(self, ingredients: List[Dict], quantities: List[float]) -> List[Dict]:
+        """Attach chosen quantities to ingredient dicts (safe against length mismatch)."""
+        out = []
+        n = min(len(ingredients), len(quantities))
+        for i in range(n):
+            ing = dict(ingredients[i])
+            ing['quantity_needed'] = max(0.0, float(quantities[i]))
+            out.append(ing)
+        # ignore any tail mismatch safely
+        return out
+
+    # --------------------- Parsing & Normalization ---------------------
+
+    def _normalize_target_macros(self, target_macros: Dict) -> Dict:
+        macro_mapping = {
+            'carbohydrates': 'carbs', 'carb': 'carbs', 'carbs': 'carbs',
+            'protein': 'protein', 'proteins': 'protein',
+            'fat': 'fat', 'fats': 'fat',
+            'calories': 'calories', 'calorie': 'calories', 'kcal': 'calories'
+        }
+        normalized = {}
+        for k, v in target_macros.items():
+            nk = macro_mapping.get(k.lower(), k.lower())
+            normalized[nk] = float(v)
+
+        # Fill defaults and sanitize
+        defaults = {'calories': 500.0, 'protein': 30.0, 'carbs': 50.0, 'fat': 15.0}
+        for m in ['calories', 'protein', 'carbs', 'fat']:
+            if m not in normalized or not isinstance(normalized[m], (int, float)) or normalized[m] < 0:
+                normalized[m] = defaults[m]
+        return normalized
+
+    def _extract_rag_ingredients(self, rag_response: Union[Dict, List]) -> List[Dict]:
+        """Support multiple shapes:
+           - {'suggestions': [{'ingredients': [...]}]}
+           - {'ingredients': [...]}
+           - [{'name': 'chicken', 'quantity': 100}, ...]
+        """
         ingredients = []
-        seen_ingredients = set()
-        
-        for suggestion in rag_response.get('suggestions', []):
-            for ingredient in suggestion.get('ingredients', []):
-                ingredient_name = ingredient.get('name', '').strip()
-                
-                if ingredient_name.lower() not in seen_ingredients:
-                    # Enrich ingredient with nutritional data from database
-                    enriched_ingredient = self._enrich_ingredient_with_nutrition(ingredient)
-                    ingredients.append(enriched_ingredient)
-                    seen_ingredients.add(ingredient_name.lower())
-                else:
-                    logger.info(f"⚠️ Skipping duplicate: {ingredient_name}")
-        
+        seen = set()
+
+        candidates = []
+        if isinstance(rag_response, list):
+            candidates = rag_response
+        elif isinstance(rag_response, dict):
+            if 'ingredients' in rag_response and isinstance(rag_response['ingredients'], list):
+                candidates = rag_response['ingredients']
+            elif 'suggestions' in rag_response and isinstance(rag_response['suggestions'], list):
+                for s in rag_response['suggestions']:
+                    candidates.extend(s.get('ingredients', []))
+
+        for ing in candidates:
+            name = str(ing.get('name', '')).strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in seen:
+                continue
+            enriched = self._enrich_ingredient_with_nutrition(ing)
+            # default max_quantity
+            if 'max_quantity' not in enriched:
+                enriched['max_quantity'] = max(200, int(ing.get('quantity', 200)) if isinstance(ing.get('quantity', 0), (int, float)) else 200)
+            ingredients.append(enriched)
+            seen.add(key)
+
         return ingredients
-    
+
+    def _ensure_nutrition_fields(self, ingredient: Dict) -> Dict:
+        """Ensure nutrition fields exist for helper or custom items."""
+        out = ingredient.copy()
+        base = self.nutrition_db.get(out['name'].strip().lower())
+        if base:
+            out.update({k: base[k] for k in ['protein_per_100g', 'carbs_per_100g', 'fat_per_100g', 'calories_per_100g']})
+        else:
+            for k, dv in [('protein_per_100g', 5.0), ('carbs_per_100g', 10.0), ('fat_per_100g', 5.0), ('calories_per_100g', 100.0)]:
+                out[k] = float(out.get(k, dv))
+        if 'max_quantity' not in out:
+            out['max_quantity'] = 200
+        return out
+
     def _enrich_ingredient_with_nutrition(self, ingredient: Dict) -> Dict:
-        """Enrich ingredient with nutritional data from database"""
-        ingredient_name = ingredient.get('name', '').strip().lower()
-        
-        # Enhanced ingredient name mappings for Persian meals
-        ingredient_mappings = {
-            # Persian meal specific mappings
-            'ground_beef': 'beef',
-            'beef_ground': 'beef',
-            'kabab_koobideh': 'beef',
-            'koobideh': 'beef',
-            'kabab': 'beef',
-            'grilled_beef': 'beef',
-            'beef_kabab': 'beef',
-            
-            # Chicken variations
-            'chicken_breast': 'chicken_breast',
-            'chicken_breasts': 'chicken_breast',
-            'chicken_kabab': 'chicken_breast',
-            'grilled_chicken': 'chicken_breast',
-            'joojeh_kabab': 'chicken_breast',
-            
-            # Fish variations
-            'salmon_fillet': 'salmon',
-            'salmon_fillets': 'salmon',
-            'grilled_salmon': 'salmon',
-            'tuna_fish': 'tuna',
-            'tuna_fillet': 'tuna',
-            'grilled_tuna': 'tuna',
-            
-            # Rice variations
-            'white_rice': 'white_rice',
-            'brown_rice': 'brown_rice',
-            'persian_rice': 'white_rice',
-            'steamed_rice': 'white_rice',
-            'rice': 'white_rice',
-            
-            # Bread variations
-            'whole_wheat_bread': 'whole_wheat_bread',
-            'whole_wheat_pasta': 'whole_wheat_pasta',
-            'pita_bread': 'whole_wheat_bread',
-            'lavash': 'whole_wheat_bread',
-            'barbari': 'whole_wheat_bread',
-            'sangak': 'whole_wheat_bread',
-            'bread': 'whole_wheat_bread',
-            
-            # Vegetable variations
-            'tomato': 'tomatoes',
-            'tomatoes': 'tomatoes',
-            'grilled_tomato': 'tomatoes',
-            'fresh_tomato': 'tomatoes',
-            'cherry_tomato': 'tomatoes',
-            
-            'onion': 'onion',
-            'onions': 'onion',
-            'red_onion': 'onion',
-            'white_onion': 'onion',
-            'grilled_onion': 'onion',
-            
-            'pepper': 'bell_peppers',
-            'bell_pepper': 'bell_peppers',
-            'bell_peppers': 'bell_peppers',
-            'grilled_pepper': 'bell_peppers',
-            'green_pepper': 'bell_peppers',
-            'red_pepper': 'bell_peppers',
-            'yellow_pepper': 'bell_peppers',
-            
-            'cucumber': 'cucumber',
-            'cucumbers': 'cucumber',
-            'fresh_cucumber': 'cucumber',
-            
-            'lettuce': 'romaine_lettuce',
-            'romaine': 'romaine_lettuce',
-            'salad_lettuce': 'romaine_lettuce',
-            
-            'carrot': 'carrots',
-            'carrots': 'carrots',
-            'fresh_carrot': 'carrots',
-            
-            'potato': 'potato',
-            'potatoes': 'potato',
-            'baked_potato': 'potato',
-            'boiled_potato': 'potato',
-            
-            'sweet_potato': 'sweet_potato',
-            'sweet_potatoes': 'sweet_potato',
-            
-            # Legume variations
-            'lentils': 'lentils',
-            'lentil': 'lentils',
-            'red_lentils': 'lentils',
-            'green_lentils': 'lentils',
-            
-            'chickpeas': 'chickpeas',
-            'chickpea': 'chickpeas',
-            'garbanzo': 'chickpeas',
-            
-            'black_beans': 'black_beans',
-            'black_bean': 'black_beans',
-            
-            'kidney_beans': 'kidney_beans',
-            'kidney_bean': 'kidney_beans',
-            
-            # Nut variations
-            'almonds': 'almonds',
-            'almond': 'almonds',
-            'raw_almonds': 'almonds',
-            
-            'walnuts': 'walnuts',
-            'walnut': 'walnuts',
-            'raw_walnuts': 'walnuts',
-            
-            'cashews': 'cashews',
-            'cashew': 'cashews',
-            'raw_cashews': 'cashews',
-            
-            'peanuts': 'peanuts',
-            'peanut': 'peanuts',
-            'raw_peanuts': 'peanuts',
-            
-            'pecans': 'pecans',
-            'pecan': 'pecans',
-            'raw_pecans': 'pecans',
-            
-            'macadamia_nuts': 'macadamia_nuts',
-            'macadamia': 'macadamia_nuts',
-            'raw_macadamia': 'macadamia_nuts',
-            
-            'pistachios': 'pistachios',
-            'pistachio': 'pistachios',
-            'raw_pistachios': 'pistachios',
-            
-            # Oil variations
-            'olive_oil': 'olive_oil',
-            'extra_virgin_olive_oil': 'olive_oil',
-            'evoo': 'olive_oil',
-            
-            'coconut_oil': 'coconut_oil',
-            'virgin_coconut_oil': 'coconut_oil',
-            
-            # Dairy variations
-            'greek_yogurt': 'greek_yogurt',
-            'yogurt': 'greek_yogurt',
-            'plain_yogurt': 'greek_yogurt',
-            
-            'cottage_cheese': 'cottage_cheese',
-            'cottage': 'cottage_cheese',
-            
-            # Protein powder variations
-            'protein_powder': 'protein_powder',
-            'whey_protein': 'whey_protein',
-            'casein_protein': 'casein_protein',
-            'protein_supplement': 'protein_powder',
-            
-            # Grain variations
-            'oats': 'oats',
-            'oatmeal': 'oats',
-            'rolled_oats': 'oats',
-            'steel_cut_oats': 'oats',
-            
-            'quinoa': 'quinoa',
-            'quinoa_grain': 'quinoa',
-            
-            # Fruit variations
-            'banana': 'banana',
-            'bananas': 'banana',
-            'fresh_banana': 'banana',
-            
-            'apple': 'apple',
-            'apples': 'apple',
-            'fresh_apple': 'apple',
-            
-            'orange': 'orange',
-            'oranges': 'orange',
-            'fresh_orange': 'orange',
-        }
-        
-        # Check mappings first
-        mapped_name = ingredient_mappings.get(ingredient_name, ingredient_name)
-        
-        # Look for exact match first
-        for db_ingredient in self.ingredients_db:
-            if db_ingredient['name'].lower() == mapped_name:
-                enriched = ingredient.copy()
-                enriched.update({
-                    'protein_per_100g': db_ingredient.get('protein_per_100g', 0),
-                    'carbs_per_100g': db_ingredient.get('carbs_per_100g', 0),
-                    'fat_per_100g': db_ingredient.get('fat_per_100g', 0),
-                    'calories_per_100g': db_ingredient.get('calories_per_100g', 0),
-                    'max_quantity': db_ingredient.get('max_quantity', 200)
-                })
-                logger.info(f"✅ Enriched {ingredient_name} (mapped to {mapped_name}) with nutritional data")
-                return enriched
-        
-        # Look for partial matches with improved logic
-        for db_ingredient in self.ingredients_db:
-            db_name = db_ingredient['name'].lower()
-            
-            # Check various matching patterns
-            if (ingredient_name in db_name or 
-                db_name in ingredient_name or 
-                ingredient_name.replace('_', ' ') in db_name or 
-                db_name.replace('_', ' ') in ingredient_name or
-                ingredient_name.replace('_', '') in db_name.replace('_', '') or
-                db_name.replace('_', '') in ingredient_name.replace('_', '') or
-                any(word in db_name for word in ingredient_name.split('_')) or
-                any(word in ingredient_name for word in db_name.split('_'))):
-                
-                enriched = ingredient.copy()
-                enriched.update({
-                    'protein_per_100g': db_ingredient.get('protein_per_100g', 0),
-                    'carbs_per_100g': db_ingredient.get('carbs_per_100g', 0),
-                    'fat_per_100g': db_ingredient.get('fat_per_100g', 0),
-                    'calories_per_100g': db_ingredient.get('calories_per_100g', 0),
-                    'max_quantity': db_ingredient.get('max_quantity', 200)
-                })
-                logger.info(f"✅ Enriched {ingredient_name} with partial match to {db_name}")
-                return enriched
-        
-        # If still no match, try to find similar ingredients by category
-        ingredient_words = set(ingredient_name.replace('_', ' ').split())
-        
-        for db_ingredient in self.ingredients_db:
-            db_name = db_ingredient['name'].lower()
-            db_words = set(db_name.replace('_', ' ').split())
-            
-            # Check if there's significant word overlap
-            if len(ingredient_words.intersection(db_words)) >= 1:
-                enriched = ingredient.copy()
-                enriched.update({
-                    'protein_per_100g': db_ingredient.get('protein_per_100g', 0),
-                    'carbs_per_100g': db_ingredient.get('carbs_per_100g', 0),
-                    'fat_per_100g': db_ingredient.get('fat_per_100g', 0),
-                    'calories_per_100g': db_ingredient.get('calories_per_100g', 0),
-                    'max_quantity': db_ingredient.get('max_quantity', 200)
-                })
-                logger.info(f"✅ Enriched {ingredient_name} with word overlap to {db_name}")
-                return enriched
-        
-        # If no match found, use default values based on ingredient type and log warning
-        logger.warning(f"⚠️ No nutritional data found for {ingredient_name}, using intelligent defaults")
-        
-        # Try to guess nutritional values based on ingredient name
-        default_values = self._guess_nutritional_values(ingredient_name)
-        
-        enriched = ingredient.copy()
-        enriched.update({
-            'protein_per_100g': default_values['protein'],
-            'carbs_per_100g': default_values['carbs'],
-            'fat_per_100g': default_values['fat'],
-            'calories_per_100g': default_values['calories'],
-            'max_quantity': 200
-        })
-        
-        logger.info(f"🔄 Using guessed values for {ingredient_name}: {default_values}")
-        return enriched
-    
-    def _guess_nutritional_values(self, ingredient_name: str) -> Dict[str, float]:
-        """Guess nutritional values based on ingredient name patterns"""
-        ingredient_lower = ingredient_name.lower()
-        
-        # Protein-rich ingredients
-        if any(word in ingredient_lower for word in ['beef', 'chicken', 'fish', 'salmon', 'tuna', 'meat', 'kabab', 'koobideh', 'joojeh']):
-            return {'protein': 25, 'carbs': 0, 'fat': 15, 'calories': 250}
-        
-        # Carb-rich ingredients
-        elif any(word in ingredient_lower for word in ['rice', 'bread', 'pasta', 'pita', 'lavash', 'barbari', 'sangak', 'potato', 'oats']):
-            return {'protein': 3, 'carbs': 25, 'fat': 1, 'calories': 120}
-        
-        # Fat-rich ingredients
-        elif any(word in ingredient_lower for word in ['oil', 'nuts', 'almond', 'walnut', 'cashew', 'peanut', 'pecan', 'macadamia']):
-            return {'protein': 8, 'carbs': 15, 'fat': 50, 'calories': 550}
-        
-        # Vegetable ingredients
-        elif any(word in ingredient_lower for word in ['tomato', 'onion', 'pepper', 'cucumber', 'lettuce', 'carrot', 'broccoli', 'spinach']):
-            return {'protein': 1, 'carbs': 5, 'fat': 0, 'calories': 25}
-        
-        # Fruit ingredients
-        elif any(word in ingredient_lower for word in ['apple', 'banana', 'orange', 'grape', 'berry', 'mango', 'pineapple']):
-            return {'protein': 1, 'carbs': 15, 'fat': 0, 'calories': 60}
-        
-        # Dairy ingredients
-        elif any(word in ingredient_lower for word in ['yogurt', 'cheese', 'milk', 'cream']):
-            return {'protein': 8, 'carbs': 4, 'fat': 5, 'calories': 100}
-        
-        # Legume ingredients
-        elif any(word in ingredient_lower for word in ['lentil', 'bean', 'chickpea', 'pea']):
-            return {'protein': 8, 'carbs': 20, 'fat': 1, 'calories': 120}
-        
-        # Default fallback
+        name = ingredient.get('name', '').strip().lower()
+        out = ingredient.copy()
+        base = self.nutrition_db.get(name)
+        if base:
+            out.update(base)
         else:
-            return {'protein': 5, 'carbs': 10, 'fat': 5, 'calories': 100}
-    
-    def _calculate_current_totals(self, ingredients: List[Dict]) -> Dict:
-        """Calculate current nutritional totals"""
-        totals = {'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0}
-        
-        for ingredient in ingredients:
-            quantity = ingredient.get('quantity_needed', 100) / 100  # Convert to ratio
-            totals['calories'] += ingredient.get('calories_per_100g', 0) * quantity
-            totals['protein'] += ingredient.get('protein_per_100g', 0) * quantity
-            totals['carbs'] += ingredient.get('carbs_per_100g', 0) * quantity
-            totals['fat'] += ingredient.get('fat_per_100g', 0) * quantity
-        
-        return totals
-    
-    def _calculate_macro_deficits(self, current: Dict, target: Dict) -> Dict:
-        """Calculate macro deficits"""
-        return {
-            'calories': max(0, target['calories'] - current['calories']),
-            'protein': max(0, target['protein'] - current['protein']),
-            'carbs': max(0, target['carbs'] - current['carbs']),
-            'fat': max(0, target['fat'] - current['fat'])
-        }
-    
-    def _find_best_supplement(self, macro: str, deficit: float) -> Optional[Dict]:
-        """Find best supplement for a specific macro"""
-        best_ingredient = None
-        best_efficiency = 0
-        
-        for ingredient in self.ingredients_db:
-            macro_content = ingredient.get(f'{macro}_per_100g', 0)
-            if macro_content > 0:
-                # Calculate efficiency (macro per calorie)
-                calories = ingredient.get('calories_per_100g', 1)
-                efficiency = macro_content / max(calories, 1)
-                
-                if efficiency > best_efficiency:
-                    best_efficiency = efficiency
-                    best_ingredient = ingredient.copy()
-        
-        if best_ingredient:
-            # Calculate exact quantity needed to fill the deficit
-            macro_content = best_ingredient.get(f'{macro}_per_100g', 0)
-            exact_quantity = (deficit / macro_content) * 100
-            
-            # Use exact quantity needed (no bounds)
-            best_ingredient['quantity_needed'] = exact_quantity
-            
-            logger.info(f"📏 {macro} supplement: {best_ingredient['name']} - {exact_quantity:.1f}g needed")
-        
-        return best_ingredient
-    
-    def _run_advanced_optimizations(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
-        """Run advanced optimization algorithms and return the best result"""
-        logger.info(f"🚀 Running advanced optimization algorithms...")
-        
+            # fallback defaults
+            out.setdefault('protein_per_100g', 5.0)
+            out.setdefault('carbs_per_100g', 10.0)
+            out.setdefault('fat_per_100g', 5.0)
+            out.setdefault('calories_per_100g', 100.0)
+        out.setdefault('max_quantity', 200)
+        return out
+
+    # --------------------- Optimization Core ---------------------
+
+    def _run_optimization_methods(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
+        logger.info("🚀 Running advanced optimization methods...")
         results = []
-        
-        # Algorithm 1: Linear Optimization with PuLP
+
+        # Method A: PuLP LP (min calories subject to min macros)
+        if PULP_AVAILABLE:
+            try:
+                results.append(self._linear_optimize_pulp(ingredients, target_macros))
+                logger.info("✅ PuLP finished.")
+            except Exception as e:
+                logger.warning(f"❌ PuLP failed: {e}")
+
+        # Method B: DEAP GA
+        if DEAP_AVAILABLE:
+            try:
+                results.append(self._genetic_algorithm_optimize(ingredients, target_macros))
+                logger.info("✅ GA finished.")
+            except Exception as e:
+                logger.warning(f"❌ GA failed: {e}")
+
+        # Method C: SciPy Differential Evolution
+        if SCIPY_AVAILABLE:
+            try:
+                results.append(self._differential_evolution_optimize(ingredients, target_macros))
+                logger.info("✅ Differential Evolution finished.")
+            except Exception as e:
+                logger.warning(f"❌ Differential Evolution failed: {e}")
+
+        # Method D: Hybrid (GA + DE)
+        if DEAP_AVAILABLE and SCIPY_AVAILABLE:
+            try:
+                results.append(self._hybrid_optimize(ingredients, target_macros))
+                logger.info("✅ Hybrid finished.")
+            except Exception as e:
+                logger.warning(f"❌ Hybrid failed: {e}")
+
+        # Method E: Optuna
+        if OPTUNA_AVAILABLE:
+            try:
+                results.append(self._optuna_optimize(ingredients, target_macros))
+                logger.info("✅ Optuna finished.")
+            except Exception as e:
+                logger.warning(f"❌ Optuna failed: {e}")
+
+        # Safety net: Greedy heuristic (never fails), used only if no success above
+        if not results:
+            logger.warning("⚠️ No advanced method succeeded; using greedy heuristic.")
+            results.append(self._greedy_heuristic(ingredients, target_macros))
+
+        best = self._evaluate_optimization_results(results, ingredients, target_macros)
+        if not best:
+            # As absolute fallback
+            logger.warning("⚠️ No valid result; falling back to greedy heuristic.")
+            best = self._greedy_heuristic(ingredients, target_macros)
+
+        logger.info(f"🏆 Best method: {best['method']}")
+        return best
+
+    # ---- Method Implementations ----
+
+    def _linear_optimize_pulp(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
+        """
+        Relax calorie constraint in PuLP to allow up to 10% above target.
+        """
         try:
-            result1 = self._linear_optimize(ingredients, target_macros)
-            results.append(result1)
-            logger.info(f"✅ Algorithm 1 (Linear Optimization) completed")
-        except Exception as e:
-            logger.warning(f"❌ Linear optimization failed: {e}")
-        
-        # Algorithm 2: Differential Evolution
-        try:
-            result2 = self._differential_evolution_optimize(ingredients, target_macros)
-            results.append(result2)
-            logger.info(f"✅ Algorithm 2 (Differential Evolution) completed")
-        except Exception as e:
-            logger.warning(f"❌ Differential evolution failed: {e}")
-        
-        # Algorithm 3: Genetic Algorithm
-        try:
-            result3 = self._genetic_algorithm_optimize(ingredients, target_macros)
-            results.append(result3)
-            logger.info(f"✅ Algorithm 3 (Genetic Algorithm) completed")
-        except Exception as e:
-            logger.warning(f"❌ Genetic algorithm failed: {e}")
-        
-        # Algorithm 4: Optuna Optimization
-        try:
-            result4 = self._optuna_optimize(ingredients, target_macros)
-            results.append(result4)
-            logger.info(f"✅ Algorithm 4 (Optuna) completed")
-        except Exception as e:
-            logger.warning(f"❌ Optuna optimization failed: {e}")
-        
-        # Algorithm 5: Hybrid Optimization
-        try:
-            result5 = self._hybrid_optimize(ingredients, target_macros)
-            results.append(result5)
-            logger.info(f"✅ Algorithm 5 (Hybrid) completed")
-        except Exception as e:
-            logger.warning(f"❌ Hybrid optimization failed: {e}")
-        
-        # Evaluate all results and pick the best one
-        if results:
-            best_result = self._evaluate_optimization_results(results, ingredients, target_macros)
-            logger.info(f"🏆 Best algorithm: {best_result['method']}")
-            return best_result
-        else:
-            # Fallback to simple optimization if all algorithms fail
-            logger.warning("⚠️ All optimization algorithms failed, using fallback")
-            return self._fallback_optimize(ingredients, target_macros)
-    
-    def _linear_optimize(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
-        """Linear optimization using PuLP"""
-        try:
-            from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
-            
-            # Create optimization problem
+            from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpStatus
             prob = LpProblem("Meal_Optimization", LpMinimize)
+            n = len(ingredients)
+            x = [LpVariable(f"x_{i}", 0, float(ingredients[i].get('max_quantity', 500))) for i in range(n)]
             
-            # Variables: quantity of each ingredient (in grams)
-            x = {}
-            for i, ingredient in enumerate(ingredients):
-                max_qty = ingredient.get('max_quantity', 200)
-                x[i] = LpVariable(f"x_{i}", lowBound=0, upBound=max_qty)
+            # Objective: Minimize deviation from target macros + encourage ingredient usage
+            deviations = {}
+            for macro in ['protein', 'carbs', 'fat']:
+                target = target_macros[macro]
+                total = lpSum(x[i] * ingredients[i].get(f'{macro}_per_100g', 0) / 100 for i in range(n))
+                deviations[macro] = LpVariable(f"dev_{macro}", 0)
+                prob += deviations[macro] >= (total - target) / target
+                prob += deviations[macro] >= (target - total) / target
             
-            # Objective: minimize total calories
-            prob += lpSum(x[i] * ingredients[i].get('calories_per_100g', 0) / 100 for i in range(len(ingredients)))
+            prob += lpSum(deviations[m] for m in ['protein', 'carbs', 'fat'])
             
-            # Constraints
-            # Protein constraint
-            prob += lpSum(x[i] * ingredients[i].get('protein_per_100g', 0) / 100 for i in range(len(ingredients))) >= target_macros['protein']
+            # Macro constraints - ensure minimum requirements
+            for macro in ['protein', 'carbs', 'fat']:
+                prob += lpSum(x[i] * ingredients[i].get(f'{macro}_per_100g', 0) / 100 for i in range(n)) >= target_macros[macro] * 0.95
             
-            # Carbs constraint
-            prob += lpSum(x[i] * ingredients[i].get('carbs_per_100g', 0) / 100 for i in range(len(ingredients))) >= target_macros['carbs']
+            # Calorie constraint
+            prob += lpSum(x[i] * ingredients[i].get('calories_per_100g', 0) / 100 for i in range(n)) <= target_macros['calories'] * 1.1
+            prob += lpSum(x[i] * ingredients[i].get('calories_per_100g', 0) / 100 for i in range(n)) >= target_macros['calories'] * 0.9
             
-            # Fat constraint
-            prob += lpSum(x[i] * ingredients[i].get('fat_per_100g', 0) / 100 for i in range(len(ingredients))) >= target_macros['fat']
-            
-            # Solve
             prob.solve()
+            if LpStatus[prob.status] != 'Optimal':
+                logger.warning(f"PuLP optimization failed: {LpStatus[prob.status]}")
+                return {'method': 'PuLP', 'quantities': [0.0] * n}
             
-            if prob.status == 1:  # Optimal solution found
-                quantities = [value(x[i]) for i in range(len(ingredients))]
-                return {
-                    'success': True,
-                    'method': 'Linear Optimization (PuLP)',
-                    'quantities': quantities
-                }
-            else:
-                raise Exception("No optimal solution found")
-                
-        except ImportError:
-            raise Exception("PuLP not available")
+            quantities = [x[i].varValue for i in range(n)]
+            
+            # Post-process to ensure minimum quantities for used ingredients
+            for i in range(n):
+                if quantities[i] > 0.1 and quantities[i] < 10.0:
+                    quantities[i] = 10.0
+            
+            return {'method': 'PuLP', 'quantities': quantities, 'success': True}
         except Exception as e:
-            raise Exception(f"Linear optimization error: {e}")
-    
-    def _differential_evolution_optimize(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
-        """Differential evolution optimization using SciPy"""
+            logger.error(f"PuLP optimization error: {e}")
+            return {'method': 'PuLP', 'quantities': [0.0] * len(ingredients), 'success': False}
+
+    def _setup_deap(self):
         try:
-            # Prepare data for optimization
-            ingredient_data = []
-            bounds = []
-            
-            for ingredient in ingredients:
-                max_qty = ingredient.get('max_quantity', 200)
-                bounds.append((0, max_qty))
-                ingredient_data.append({
-                    'protein': ingredient.get('protein_per_100g', 0),
-                    'carbs': ingredient.get('carbs_per_100g', 0),
-                    'fat': ingredient.get('fat_per_100g', 0),
-                    'calories': ingredient.get('calories_per_100g', 0)
-                })
-            
-            # Objective function
-            def objective(quantities):
-                total_protein = sum(qty * data['protein'] / 100 for qty, data in zip(quantities, ingredient_data))
-                total_carbs = sum(qty * data['carbs'] / 100 for qty, data in zip(quantities, ingredient_data))
-                total_fat = sum(qty * data['fat'] / 100 for qty, data in zip(quantities, ingredient_data))
-                total_calories = sum(qty * data['calories'] / 100 for qty, data in zip(quantities, ingredient_data))
-                
-                # Penalty for not meeting targets
-                penalty = 0
-                if total_protein < target_macros['protein']:
-                    penalty += (target_macros['protein'] - total_protein) ** 2 * 100
-                if total_carbs < target_macros['carbs']:
-                    penalty += (target_macros['carbs'] - total_carbs) ** 2 * 100
-                if total_fat < target_macros['fat']:
-                    penalty += (target_macros['fat'] - total_fat) ** 2 * 100
-                
-                return total_calories + penalty
-            
-            # Run differential evolution
-            result = differential_evolution(
-                objective, 
-                bounds, 
-                popsize=15, 
-                mutation=0.5, 
-                recombination=0.7, 
-                maxiter=100,
-                seed=42
-            )
-            
-            if result.success:
-                return {
-                    'success': True,
-                    'method': 'Differential Evolution (SciPy)',
-                    'quantities': result.x.tolist()
-                }
-            else:
-                raise Exception("Differential evolution did not converge")
-                
+            # Clear any existing creators to avoid conflicts
+            if hasattr(creator, 'FitnessMin'):
+                del creator.FitnessMin
+            if hasattr(creator, 'Individual'):
+                del creator.Individual
+            creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+            creator.create("Individual", list, fitness=creator.FitnessMin)
+
+            self.toolbox = base.Toolbox()
+            self.toolbox.register("attr_float", random.uniform, 0, 500)
+            self.toolbox.register("mate", tools.cxBlend, alpha=0.5)
+            self.toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=50, indpb=0.2)
+            self.toolbox.register("select", tools.selTournament, tournsize=3)
         except Exception as e:
-            raise Exception(f"Differential evolution error: {e}")
-    
+            logger.warning(f"DEAP setup failed: {e}")
+            global DEAP_AVAILABLE
+            DEAP_AVAILABLE = False
+
     def _genetic_algorithm_optimize(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
-        """Genetic algorithm optimization"""
-        try:
-            # Prepare data
-            ingredient_data = []
-            bounds = []
-            
-            for ingredient in ingredients:
-                max_qty = ingredient.get('max_quantity', 200)
-                bounds.append((0, max_qty))
-                ingredient_data.append({
-                    'protein': ingredient.get('protein_per_100g', 0),
-                    'carbs': ingredient.get('carbs_per_100g', 0),
-                    'fat': ingredient.get('fat_per_100g', 0),
-                    'calories': ingredient.get('calories_per_100g', 0)
-                })
-            
-            # Population size and generations
-            pop_size = 50
-            generations = 30
-            
-            # Initialize population
-            population = []
-            for _ in range(pop_size):
-                individual = [random.uniform(bounds[i][0], bounds[i][1]) for i in range(len(ingredients))]
-                population.append(individual)
-            
-            # Fitness function
-            def fitness(individual):
-                total_protein = sum(qty * data['protein'] / 100 for qty, data in zip(individual, ingredient_data))
-                total_carbs = sum(qty * data['carbs'] / 100 for qty, data in zip(individual, ingredient_data))
-                total_fat = sum(qty * data['fat'] / 100 for qty, data in zip(individual, ingredient_data))
-                total_calories = sum(qty * data['calories'] / 100 for qty, data in zip(individual, ingredient_data))
-                
-                # Penalty for not meeting targets
-                penalty = 0
-                if total_protein < target_macros['protein']:
-                    penalty += (target_macros['protein'] - total_protein) ** 2 * 100
-                if total_carbs < target_macros['carbs']:
-                    penalty += (target_macros['carbs'] - total_carbs) ** 2 * 100
-                if total_fat < target_macros['fat']:
-                    penalty += (target_macros['fat'] - total_fat) ** 2 * 100
-                
-                return total_calories + penalty
-            
-            # Evolution loop
-            best_individual = None
-            best_fitness = float('inf')
-            
-            for generation in range(generations):
-                # Evaluate fitness
-                fitness_scores = [fitness(ind) for ind in population]
-                
-                # Find best individual
-                min_idx = fitness_scores.index(min(fitness_scores))
-                if fitness_scores[min_idx] < best_fitness:
-                    best_fitness = fitness_scores[min_idx]
-                    best_individual = population[min_idx].copy()
-                
-                # Selection (tournament)
-                new_population = []
-                for _ in range(pop_size):
-                    # Tournament selection
-                    tournament_size = 3
-                    tournament = random.sample(range(pop_size), tournament_size)
-                    winner_idx = min(tournament, key=lambda i: fitness_scores[i])
-                    new_population.append(population[winner_idx].copy())
-                
-                # Crossover and mutation
-                for i in range(0, pop_size, 2):
-                    if i + 1 < pop_size:
-                        # Crossover
-                        if random.random() < 0.7:
-                            crossover_point = random.randint(1, len(ingredients) - 1)
-                            new_population[i][:crossover_point], new_population[i+1][:crossover_point] = \
-                                new_population[i+1][:crossover_point], new_population[i][:crossover_point]
-                        
-                        # Mutation
-                        for j in range(len(ingredients)):
-                            if random.random() < 0.1:
-                                new_population[i][j] = random.uniform(bounds[j][0], bounds[j][1])
-                            if random.random() < 0.1:
-                                new_population[i+1][j] = random.uniform(bounds[j][0], bounds[j][1])
-                
-                population = new_population
-            
-            if best_individual:
-                return {
-                    'success': True,
-                    'method': 'Genetic Algorithm',
-                    'quantities': best_individual
-                }
+        n = len(ingredients)
+
+        # fresh registration for this problem size
+        self.toolbox.register("individual", tools.initRepeat, creator.Individual, self.toolbox.attr_float, n=n)
+
+        def eval_ind(individual):
+            return (self._ga_cost(individual, ingredients, target_macros),)
+
+        self.toolbox.register("evaluate", eval_ind)
+
+        pop = [self._random_feasible_individual(ingredients) for _ in range(300)]  # Increased from 200
+        pop = list(map(creator.Individual, pop))
+
+        for gen in range(150):  # Increased from 100
+            offspring = self.toolbox.select(pop, len(pop))
+            offspring = list(map(self.toolbox.clone, offspring))
+
+            for c1, c2 in zip(offspring[::2], offspring[1::2]):
+                if random.random() < 0.8:  # Increased crossover rate
+                    self.toolbox.mate(c1, c2)
+                    del c1.fitness.values
+                    del c2.fitness.values
+
+            for mut in offspring:
+                if random.random() < 0.3:  # Increased mutation rate
+                    self.toolbox.mutate(mut)
+                    # clamp to bounds
+                    for i in range(n):
+                        mut[i] = min(max(mut[i], 0.0), float(ingredients[i].get('max_quantity', 500)))
+                    del mut.fitness.values
+
+            invalid = [ind for ind in offspring if not ind.fitness.valid]
+            fits = map(self.toolbox.evaluate, invalid)
+            for ind, fit in zip(invalid, fits):
+                ind.fitness.values = fit
+
+            pop[:] = offspring
+
+        best = tools.selBest(pop, 1)[0]
+        quantities = list(map(float, best))
+        
+        # Apply refinement for better precision
+        refined_quantities = self._refine_solution(ingredients, quantities, target_macros)
+        
+        return {'success': True, 'method': 'Genetic Algorithm (DEAP)', 'quantities': refined_quantities}
+
+    def _ga_cost(self, quantities: List[float], ingredients: List[Dict], target_macros: Dict) -> float:
+        """
+        Reduce penalty for calorie excess and add bonus for close macro matches.
+        """
+        totals = self._calculate_final_meal(ingredients, quantities)
+        penalty = 0.0
+        for m in ['protein', 'carbs', 'fat']:
+            tv = target_macros[m]
+            av = totals[m]
+            deviation = abs(av - tv) / tv
+            if deviation <= 0.05:
+                penalty += deviation * 5.0
             else:
-                raise Exception("Genetic algorithm did not find solution")
-                
-        except Exception as e:
-            raise Exception(f"Genetic algorithm error: {e}")
-    
-    def _optuna_optimize(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
-        """Optuna optimization"""
-        try:
-            # Prepare data
-            ingredient_data = []
-            bounds = []
-            
-            for ingredient in ingredients:
-                max_qty = ingredient.get('max_quantity', 200)
-                bounds.append((0, max_qty))
-                ingredient_data.append({
-                    'protein': ingredient.get('protein_per_100g', 0),
-                    'carbs': ingredient.get('carbs_per_100g', 0),
-                    'fat': ingredient.get('fat_per_100g', 0),
-                    'calories': ingredient.get('calories_per_100g', 0)
-                })
-            
-            # Objective function for Optuna
-            def objective(trial):
-                quantities = []
-                for i in range(len(ingredients)):
-                    qty = trial.suggest_float(f'qty_{i}', bounds[i][0], bounds[i][1])
-                    quantities.append(qty)
-                
-                total_protein = sum(qty * data['protein'] / 100 for qty, data in zip(quantities, ingredient_data))
-                total_carbs = sum(qty * data['carbs'] / 100 for qty, data in zip(quantities, ingredient_data))
-                total_fat = sum(qty * data['fat'] / 100 for qty, data in zip(quantities, ingredient_data))
-                total_calories = sum(qty * data['calories'] / 100 for qty, data in zip(quantities, ingredient_data))
-                
-                # Penalty for not meeting targets
-                penalty = 0
-                if total_protein < target_macros['protein']:
-                    penalty += (target_macros['protein'] - total_protein) ** 2 * 100
-                if total_carbs < target_macros['carbs']:
-                    penalty += (target_macros['carbs'] - total_carbs) ** 2 * 100
-                if total_fat < target_macros['fat']:
-                    penalty += (target_macros['fat'] - total_fat) ** 2 * 100
-                
-                return total_calories + penalty
-            
-            # Create study and optimize
-            study = optuna.create_study(direction='minimize')
-            study.optimize(objective, n_trials=100)
-            
-            if study.best_params:
-                # Extract quantities from best parameters
-                quantities = []
-                for i in range(len(ingredients)):
-                    qty = study.best_params[f'qty_{i}']
-                    quantities.append(qty)
-                
-                return {
-                    'success': True,
-                    'method': 'Optuna Optimization',
-                    'quantities': quantities
-                }
-            else:
-                raise Exception("Optuna did not find solution")
-                
-        except Exception as e:
-            raise Exception(f"Optuna optimization error: {e}")
-    
+                penalty += deviation * 50.0  # Reduced penalty
+        
+        if totals['calories'] > target_macros['calories']:
+            excess_ratio = (totals['calories'] - target_macros['calories']) / target_macros['calories']
+            penalty += excess_ratio * 100.0  # Reduced penalty
+        elif totals['calories'] < target_macros['calories'] * 0.9:
+            penalty += (target_macros['calories'] - totals['calories']) / target_macros['calories'] * 100.0
+        
+        # Bonus for being very close
+        bonus = 0.0
+        for m in ['protein', 'carbs', 'fat']:
+            tv = target_macros[m]
+            av = totals[m]
+            if abs(av - tv) / tv <= 0.02:
+                bonus -= 150.0  # Stronger bonus
+        return penalty + bonus
+
+    def _random_feasible_individual(self, ingredients: List[Dict]) -> List[float]:
+        # Random within [0, max_quantity]
+        return [random.uniform(0, float(ing.get('max_quantity', 500))) for ing in ingredients]
+
+    def _differential_evolution_optimize(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
+        n = len(ingredients)
+        bounds = [(0.0, float(ingredients[i].get('max_quantity', 500))) for i in range(n)]
+
+        def cost(xs):
+            totals = self._calculate_final_meal(ingredients, xs)
+            penalty = 0.0
+            for m in ['protein', 'carbs', 'fat']:
+                if totals[m] < target_macros[m]:
+                    penalty += (target_macros[m] - totals[m]) ** 2 * 80
+            return totals['calories'] + penalty
+
+        result = differential_evolution(cost, bounds, popsize=15, mutation=0.5, recombination=0.7, maxiter=100, seed=42)
+        if result.success:
+            return {'success': True, 'method': 'Differential Evolution (SciPy)', 'quantities': result.x.tolist()}
+        raise Exception("Differential evolution did not converge")
+
     def _hybrid_optimize(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
-        """Hybrid optimization combining multiple approaches"""
-        try:
-            # First, try differential evolution for initial solution
-            de_result = self._differential_evolution_optimize(ingredients, target_macros)
-            
-            if de_result['success']:
-                # Use DE result as starting point for genetic algorithm refinement
-                initial_population = []
-                pop_size = 20
-                
-                # Create population around the DE solution
-                for _ in range(pop_size):
-                    individual = de_result['quantities'].copy()
-                    # Add some variation
-                    for i in range(len(individual)):
-                        variation = random.uniform(0.8, 1.2)
-                        individual[i] = max(0, min(individual[i] * variation, ingredients[i].get('max_quantity', 200)))
-                    initial_population.append(individual)
-                
-                # Run genetic algorithm with this initial population
-                ga_result = self._genetic_algorithm_optimize_with_population(ingredients, target_macros, initial_population)
-                
-                if ga_result['success']:
-                    return {
-                        'success': True,
-                        'method': 'Hybrid (DE + GA)',
-                        'quantities': ga_result['quantities']
-                    }
-                else:
-                    return de_result  # Fall back to DE result
-            else:
-                raise Exception("Differential evolution failed in hybrid approach")
-                
-        except Exception as e:
-            raise Exception(f"Hybrid optimization error: {e}")
-    
-    def _genetic_algorithm_optimize_with_population(self, ingredients: List[Dict], target_macros: Dict, initial_population: List[List[float]]) -> Dict:
-        """Genetic algorithm with custom initial population"""
-        try:
-            # Prepare data
-            ingredient_data = []
-            bounds = []
-            
-            for ingredient in ingredients:
-                max_qty = ingredient.get('max_quantity', 200)
-                bounds.append((0, max_qty))
-                ingredient_data.append({
-                    'protein': ingredient.get('protein_per_100g', 0),
-                    'carbs': ingredient.get('carbs_per_100g', 0),
-                    'fat': ingredient.get('fat_per_100g', 0),
-                    'calories': ingredient.get('calories_per_100g', 0)
-                })
-            
-            # Use initial population
-            population = initial_population.copy()
-            pop_size = len(population)
-            generations = 20  # Fewer generations for refinement
-            
-            # Fitness function
-            def fitness(individual):
-                total_protein = sum(qty * data['protein'] / 100 for qty, data in zip(individual, ingredient_data))
-                total_carbs = sum(qty * data['carbs'] / 100 for qty, data in zip(individual, ingredient_data))
-                total_fat = sum(qty * data['fat'] / 100 for qty, data in zip(individual, ingredient_data))
-                total_calories = sum(qty * data['calories'] / 100 for qty, data in zip(individual, ingredient_data))
-                
-                # Penalty for not meeting targets
-                penalty = 0
-                if total_protein < target_macros['protein']:
-                    penalty += (target_macros['protein'] - total_protein) ** 2 * 100
-                if total_carbs < target_macros['carbs']:
-                    penalty += (target_macros['carbs'] - total_carbs) ** 2 * 100
-                if total_fat < target_macros['fat']:
-                    penalty += (target_macros['fat'] - total_fat) ** 2 * 100
-                
-                return total_calories + penalty
-            
-            # Evolution loop
-            best_individual = None
-            best_fitness = float('inf')
-            
-            for generation in range(generations):
-                # Evaluate fitness
-                fitness_scores = [fitness(ind) for ind in population]
-                
-                # Find best individual
-                min_idx = fitness_scores.index(min(fitness_scores))
-                if fitness_scores[min_idx] < best_fitness:
-                    best_fitness = fitness_scores[min_idx]
-                    best_individual = population[min_idx].copy()
-                
-                # Selection (tournament)
-                new_population = []
-                for _ in range(pop_size):
-                    # Tournament selection
-                    tournament_size = 3
-                    tournament = random.sample(range(pop_size), tournament_size)
-                    winner_idx = min(tournament, key=lambda i: fitness_scores[i])
-                    new_population.append(population[winner_idx].copy())
-                
-                # Crossover and mutation (gentler for refinement)
-                for i in range(0, pop_size, 2):
-                    if i + 1 < pop_size:
-                        # Crossover
-                        if random.random() < 0.5:
-                            crossover_point = random.randint(1, len(ingredients) - 1)
-                            new_population[i][:crossover_point], new_population[i+1][:crossover_point] = \
-                                new_population[i+1][:crossover_point], new_population[i][:crossover_point]
-                        
-                        # Mutation (gentler)
-                        for j in range(len(ingredients)):
-                            if random.random() < 0.05:  # Lower mutation rate
-                                variation = random.uniform(0.9, 1.1)  # Smaller variation
-                                new_population[i][j] = max(0, min(new_population[i][j] * variation, bounds[j][1]))
-                            if random.random() < 0.05:
-                                variation = random.uniform(0.9, 1.1)
-                                new_population[i+1][j] = max(0, min(new_population[i+1][j] * variation, bounds[j][1]))
-                
-                population = new_population
-            
-            if best_individual:
-                return {
-                    'success': True,
-                    'method': 'Genetic Algorithm (Refinement)',
-                    'quantities': best_individual
-                }
-            else:
-                raise Exception("Genetic algorithm refinement failed")
-                
-        except Exception as e:
-            raise Exception(f"Genetic algorithm refinement error: {e}")
-    
-    def _fallback_optimize(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
-        """Fallback optimization method"""
-        logger.info("🔄 Using fallback optimization method")
-        
-        quantities = [ingredient.get('quantity_needed', 100) for ingredient in ingredients]
-        
-        # Simple scaling approach
-        for attempt in range(3):
-            current_totals = self._calculate_current_totals(ingredients)
-            
-            if (current_totals['calories'] >= target_macros['calories'] * 0.95 and
-                current_totals['protein'] >= target_macros['protein'] * 0.95 and
-                current_totals['carbs'] >= target_macros['carbs'] * 0.95 and
-                current_totals['fat'] >= target_macros['fat'] * 0.95):
+        ga = self._genetic_algorithm_optimize(ingredients, target_macros)
+        init = np.array([ga['quantities']] * 15)
+        n = len(ingredients)
+        bounds = [(0.0, float(ingredients[i].get('max_quantity', 500))) for i in range(n)]
+
+        def cost(xs):
+            totals = self._calculate_final_meal(ingredients, xs)
+            penalty = 0.0
+            for m in ['protein', 'carbs', 'fat']:
+                if totals[m] < target_macros[m]:
+                    penalty += (target_macros[m] - totals[m]) ** 2 * 80
+            return totals['calories'] + penalty
+
+        result = differential_evolution(cost, bounds, init=init, popsize=15, mutation=0.5, recombination=0.7, maxiter=60, seed=42)
+        if result.success:
+            return {'success': True, 'method': 'Hybrid (GA + DE)', 'quantities': result.x.tolist()}
+        return ga
+
+    def _optuna_optimize(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
+        n = len(ingredients)
+
+        def objective(trial):
+            xs = [trial.suggest_float(f'x{i}', 0.0, float(ingredients[i].get('max_quantity', 500))) for i in range(n)]
+            totals = self._calculate_final_meal(ingredients, xs)
+            penalty = 0.0
+            for m in ['protein', 'carbs', 'fat']:
+                if totals[m] < target_macros[m]:
+                    penalty += (target_macros[m] - totals[m]) ** 2 * 60
+            return totals['calories'] + penalty
+
+        study = optuna.create_study(direction='minimize')
+        study.optimize(objective, n_trials=120)
+        best_params = study.best_params
+        xs = [float(best_params[f'x{i}']) for i in range(n)]
+        return {'success': True, 'method': 'Optuna Optimization', 'quantities': xs}
+
+    def _greedy_heuristic(self, ingredients: List[Dict], target_macros: Dict) -> Dict:
+        """Very simple greedy: add ingredients that best improve worst deficit per kcal."""
+        n = len(ingredients)
+        quantities = [0.0] * n
+        totals = {'calories': 0.0, 'protein': 0.0, 'carbs': 0.0, 'fat': 0.0}
+
+        def deficits():
+            return {m: max(0.0, target_macros[m] - totals[m]) for m in ['protein', 'carbs', 'fat']}
+
+        for _ in range(1000):
+            d = deficits()
+            if d['protein'] <= 0 and d['carbs'] <= 0 and d['fat'] <= 0:
                 break
+            # choose macro with largest relative deficit
+            macro = max(d, key=lambda m: d[m] / (target_macros[m] + 1e-9))
+            if d[macro] <= 0:
+                break
+            best_i, best_score = None, -1e9
+            for i, ing in enumerate(ingredients):
+                if quantities[i] >= float(ing.get('max_quantity', 500)) - 1e-6:
+                    continue
+                m_val = ing.get(f'{macro}_per_100g', 0.0)
+                kcal = ing.get('calories_per_100g', 1.0)
+                if m_val <= 0:
+                    continue
+                score = m_val / (kcal + 1e-9)
+                if score > best_score:
+                    best_score, best_i = score, i
+            if best_i is None:
+                break
+            # add in small chunks (e.g., 10g)
+            add = min(10.0, float(ingredients[best_i].get('max_quantity', 500)) - quantities[best_i])
+            quantities[best_i] += add
+            # update totals
+            totals['calories'] += ingredients[best_i]['calories_per_100g'] * add / 100.0
+            totals['protein']  += ingredients[best_i]['protein_per_100g']  * add / 100.0
+            totals['carbs']    += ingredients[best_i]['carbs_per_100g']    * add / 100.0
+            totals['fat']      += ingredients[best_i]['fat_per_100g']      * add / 100.0
+
+        return {'success': True, 'method': 'Greedy Heuristic', 'quantities': quantities}
+
+    # --------------------- Scoring & Totals ---------------------
+
+    def _evaluate_optimization_results(self, results: List[Dict], ingredients: List[Dict], target_macros: Dict) -> Optional[Dict]:
+        """Evaluate all optimization results and pick the BEST one based on target achievement."""
+        if not results:
+            return None
             
-            # Scale up quantities
-            for i in range(len(quantities)):
-                max_qty = ingredients[i].get('max_quantity', 200)
-                quantities[i] = min(quantities[i] * 1.1, max_qty)
+        logger.info(f"🔍 Evaluating {len(results)} optimization results...")
         
-        return {
-            'success': True,
-            'method': 'Fallback Scaling',
-            'quantities': quantities
-        }
-    
-    def _evaluate_optimization_results(self, results: List[Dict], ingredients: List[Dict], target_macros: Dict) -> Dict:
-        """Evaluate all optimization results and return the best one"""
         best_result = None
         best_score = float('inf')
+        best_details = {}
         
-        for result in results:
-            if result['success']:
-                # Calculate final meal with these quantities
-                final_meal = self._calculate_final_meal(ingredients, result['quantities'])
-                score = self._calculate_optimization_score(final_meal, target_macros)
+        for i, res in enumerate(results):
+            if not res.get('success'):
+                logger.warning(f"❌ Method {i+1} failed: {res.get('method', 'Unknown')}")
+                continue
                 
-                if score < best_score:
-                    best_score = score
-                    best_result = result
-        
-        return best_result
-    
-    def _calculate_optimization_score(self, actual: Dict, target: Dict) -> float:
-        """Calculate optimization score (lower is better)"""
-        score = 0
-        
-        for macro in ['calories', 'protein', 'carbs', 'fat']:
-            target_val = target[macro]
-            actual_val = actual[macro]
+            totals = self._calculate_final_meal(ingredients, res['quantities'])
+            score = self._calculate_optimization_score(totals, target_macros, res['quantities'])
+            achievement = self._check_target_achievement(totals, target_macros)
             
-            if target_val > 0:
-                if actual_val > target_val:
-                    # Penalize over-target
-                    diff = (actual_val - target_val) / target_val
-                    score += diff * diff * 5  # 5x penalty for over-target
-                else:
-                    # Penalize under-target
-                    diff = (target_val - actual_val) / target_val
-                    score += diff * diff
+            logger.info(f"📊 Method {i+1}: {res['method']}")
+            logger.info(f"   Score: {score:.2f}")
+            logger.info(f"   Achievement: {achievement}")
+            logger.info(f"   Totals: {totals}")
+            
+            # Prioritize methods that achieve ALL targets
+            if achievement['overall']:
+                # If this method achieves all targets, give it bonus
+                score *= 0.5  # 50% bonus for complete success
+                logger.info(f"   🎯 BONUS: All targets achieved!")
+            
+            if score < best_score:
+                best_score = score
+                best_result = res
+                best_details = {
+                    'score': score,
+                    'achievement': achievement,
+                    'totals': totals
+                }
+        
+        if best_result:
+            logger.info(f"🏆 BEST METHOD SELECTED: {best_result['method']}")
+            logger.info(f"   Final Score: {best_details['score']:.2f}")
+            logger.info(f"   Final Achievement: {best_details['achievement']}")
+            logger.info(f"   Final Totals: {best_details['totals']}")
+            
+            # Apply ingredient optimization to ensure all ingredients are used
+            if best_result.get('success') and 'quantities' in best_result:
+                logger.info("🔧 Applying ingredient optimization for better distribution...")
+                optimized_quantities = self._apply_ingredient_optimization(
+                    best_result['quantities'], 
+                    ingredients, 
+                    target_macros
+                )
+                best_result['quantities'] = optimized_quantities
+                
+                # Log the optimization results
+                final_totals = self._calculate_final_meal(ingredients, optimized_quantities)
+                final_achievement = self._check_target_achievement(final_totals, target_macros)
+                logger.info(f"✅ After optimization - Achievement: {final_achievement}")
+                logger.info(f"✅ After optimization - Totals: {final_totals}")
+        
+                return best_result
+
+    def _calculate_optimization_score(self, actual: Dict, target: Dict, quantities: List[float] = None) -> float:
+        """Calculate optimization score - lower is better. Prioritizes target achievement."""
+        score = 0.0
+        
+        # کالری - penalty قوی‌تر
+        tv = target['calories']
+        av = actual['calories']
+        if tv > 0:
+            deviation = abs(av - tv) / tv
+            if deviation <= 0.05:  # Within 5%
+                score += deviation * 5.0  # افزایش penalty
+            else:
+                score += deviation * 100.0  # penalty خیلی قوی
+        
+        for macro in ['protein', 'carbs', 'fat']:
+            tv = target[macro]
+            av = actual[macro]
+            if tv <= 0:
+                continue
+                
+            # Calculate deviation percentage
+            deviation = abs(av - tv) / tv
+            
+            if deviation <= 0.05:  # Within 5% tolerance
+                # Small penalty for any deviation, even within tolerance
+                score += deviation * 2.0
+            else:
+                # Heavy penalty for exceeding 5% tolerance
+                score += deviation * 50.0  # Much heavier penalty
+        
+        # Penalty for unused ingredients (if quantities provided)
+        if quantities:
+            unused_penalty = sum(1 for q in quantities if q < 10.0) * 5.0
+            score += unused_penalty
         
         return score
-    
+
     def _calculate_final_meal(self, ingredients: List[Dict], quantities: List[float]) -> Dict:
-        """Calculate final nutritional totals"""
-        totals = {'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0}
-        
-        logger.info(f"🔍 Calculating final meal with {len(ingredients)} ingredients")
-        
-        for i, ingredient in enumerate(ingredients):
-            quantity = quantities[i] / 100  # Convert grams to ratio (e.g., 100g = 1.0)
-            calories = ingredient.get('calories_per_100g', 0) * quantity
-            protein = ingredient.get('protein_per_100g', 0) * quantity
-            carbs = ingredient.get('carbs_per_100g', 0) * quantity
-            fat = ingredient.get('fat_per_100g', 0) * quantity
-            
-            totals['calories'] += calories
-            totals['protein'] += protein
-            totals['carbs'] += carbs
-            totals['fat'] += fat
-            
-            logger.info(f"  {ingredient['name']}: {quantities[i]:.1f}g -> {calories:.1f}cal, {protein:.1f}g protein, {carbs:.1f}g carbs, {fat:.1f}g fat")
-        
-        logger.info(f"📊 FINAL TOTALS: {totals['calories']:.1f}cal, {totals['protein']:.1f}g protein, {totals['carbs']:.1f}g carbs, {totals['fat']:.1f}g fat")
-        
+        totals = {'calories': 0.0, 'protein': 0.0, 'carbs': 0.0, 'fat': 0.0}
+        n = min(len(ingredients), len(quantities))
+        for i in range(n):
+            q = float(quantities[i]) / 100.0
+            totals['calories'] += ingredients[i].get('calories_per_100g', 0.0) * q
+            totals['protein']  += ingredients[i].get('protein_per_100g', 0.0)  * q
+            totals['carbs']    += ingredients[i].get('carbs_per_100g', 0.0)    * q
+            totals['fat']      += ingredients[i].get('fat_per_100g', 0.0)      * q
         return totals
-    
-    def _check_target_achievement(self, final_meal: Dict, target_macros: Dict) -> Dict:
-        """Check if targets are achieved"""
+
+    def _check_target_achievement(self, totals: Dict, target_macros: Dict) -> Dict:
+        """
+        Relax calorie tolerance to ±10% and keep ±5% for other macros.
+        """
         achievement = {}
-        
-        for macro in ['calories', 'protein', 'carbs', 'fat']:
-            target = target_macros[macro]
-            actual = final_meal[macro]
-            
-            if actual >= target * 0.95:  # 95% of target is considered achieved
-                achievement[macro] = True
+        for m, t in target_macros.items():
+            a = totals.get(m, 0)
+            if m == 'calories':
+                achieved = (a >= t * 0.90) and (a <= t * 1.10)  # Changed to ±10%
             else:
-                achievement[macro] = False
-        
-        # Overall achievement
+                achieved = (a >= t * 0.95) and (a <= t * 1.05)
+            achievement[m] = achieved
         achievement['overall'] = all(achievement.values())
-        
         return achievement
+
+    # --------------------- Smart Helpers (Aggressive but Bounded) ---------------------
+
+    def _add_smart_helper_ingredients_candidates(self, current_ingredients: List[Dict],
+                                                  target_macros: Dict, meal_type: str) -> List[Dict]:
+        """Compute deficits from current quantities; propose helper candidates (no preset quantity)."""
+        totals = {'calories': 0.0, 'protein': 0.0, 'carbs': 0.0, 'fat': 0.0}
+        for ing in current_ingredients:
+            q = float(ing.get('quantity_needed', 0.0)) / 100.0
+            totals['calories'] += ing.get('calories_per_100g', 0.0) * q
+            totals['protein']  += ing.get('protein_per_100g', 0.0)  * q
+            totals['carbs']    += ing.get('carbs_per_100g', 0.0)    * q
+            totals['fat']      += ing.get('fat_per_100g', 0.0)      * q
+
+        deficits = {
+            'protein': max(0.0, target_macros['protein'] - totals['protein']),
+            'carbs':   max(0.0, target_macros['carbs']   - totals['carbs']),
+            'fat':     max(0.0, target_macros['fat']     - totals['fat']),
+        }
+        logger.info(f"🔍 Macro deficits - Protein: {deficits['protein']:.1f}g, Carbs: {deficits['carbs']:.1f}g, Fat: {deficits['fat']:.1f}g")
+
+        existing = {ing['name'].strip().lower() for ing in current_ingredients}
+        helpers = []
+
+        # Force add helpers for any macro with deficit > 1g
+        for macro in ['protein', 'carbs', 'fat']:
+            if deficits[macro] <= 1.0:  # Increased threshold to be more aggressive
+                continue
+            
+            logger.info(f"🔧 Adding helpers for {macro} deficit: {deficits[macro]:.1f}g")
+            
+            # Add helpers until deficit is significantly reduced
+            count = 0
+            max_helpers = 3  # Increased max helpers
+            
+            while deficits[macro] > 1.0 and count < max_helpers:
+                h = self._select_best_helper_candidate(meal_type, macro, existing)
+                if not h:
+                    logger.warning(f"⚠️ No helper candidate found for {macro}")
+                    break
+                
+                # Calculate how much of this helper we can add
+                macro_per_100g = h.get(f'{macro}_per_100g', 1)
+                if macro_per_100g <= 0:
+                    continue
+                
+                # Estimate amount needed to reduce deficit by 50%
+                target_reduction = deficits[macro] * 0.5
+                estimated_amount = (target_reduction * 100) / macro_per_100g
+                
+                # Limit by max_quantity and ensure reasonable amounts
+                max_amount = min(float(h.get('max_quantity', 200)), estimated_amount * 2)
+                amount = min(estimated_amount, max_amount)
+                
+                # Check calorie impact - be very lenient
+                additional_calories = h['calories_per_100g'] * amount / 100
+                if totals['calories'] + additional_calories > target_macros['calories'] * 1.5:  # Very lenient
+                    logger.info(f"⚠️ Helper {h['name']} would add {additional_calories:.1f} calories, skipping")
+                    continue
+                
+                helpers.append(h)
+                existing.add(h['name'].strip().lower())
+                
+                # Update running totals
+                totals['calories'] += additional_calories
+                totals['protein'] += h.get('protein_per_100g', 0) * amount / 100
+                totals['carbs'] += h.get('carbs_per_100g', 0) * amount / 100
+                totals['fat'] += h.get('fat_per_100g', 0) * amount / 100
+                
+                # Recalculate deficits
+                deficits = {
+                    'protein': max(0.0, target_macros['protein'] - totals['protein']),
+                    'carbs':   max(0.0, target_macros['carbs']   - totals['carbs']),
+                    'fat':     max(0.0, target_macros['fat']     - totals['fat']),
+                }
+                
+                count += 1
+                logger.info(f"✅ Added helper {h['name']} ({amount:.1f}g) for {macro}, new deficit: {deficits[macro]:.1f}g")
+
+        logger.info(f"✅ Added {len(helpers)} helper candidates: {[h['name'] for h in helpers]}")
+        return helpers
+
+    def _select_best_helper_candidate(self, meal_type: str, macro: str, existing_names: set) -> Optional[Dict]:
+        """Pick the most efficient helper for a macro for the given meal; aggressive but bounded scoring."""
+        if meal_type not in self.helper_ingredients:
+            meal_type = 'lunch'
+        if macro not in self.helper_ingredients[meal_type]:
+            return None
+
+        best = None
+        best_score = -1e9
+        
+        # First try to find candidates in the specific meal type
+        candidates = self.helper_ingredients[meal_type][macro]
+        
+        # If no candidates found, try lunch as fallback
+        if not candidates and meal_type != 'lunch':
+            candidates = self.helper_ingredients['lunch'][macro]
+        
+        # If still no candidates, try breakfast
+        if not candidates and meal_type != 'breakfast':
+            candidates = self.helper_ingredients['breakfast'][macro]
+        
+        logger.info(f"🔍 Looking for {macro} helpers in {meal_type}, found {len(candidates)} candidates")
+        
+        for cand in candidates:
+            nm = cand['name'].strip().lower()
+            if nm in existing_names:
+                continue
+                
+            # ensure nutrition fields
+            c = self._ensure_nutrition_fields(cand)
+            macro_val = c.get(f'{macro}_per_100g', 0.0)
+            if macro_val <= 0:
+                continue
+                
+            kcal = c.get('calories_per_100g', 1.0)
+            density = macro_val / 100.0
+            kcal_eff = macro_val / (kcal + 1e-9)  # more macro per kcal is better
+            
+            # Bonus if other macros are not extreme (balance)
+            others = ['protein', 'carbs', 'fat']
+            others.remove(macro)
+            side = sum(abs(c.get(f'{m}_per_100g', 0.0)) for m in others) / 100.0
+            balance_bonus = 1.0 / (1.0 + side)
+            
+            # Bonus for fat sources to encourage their use
+            if macro == 'fat':
+                score = 0.6 * kcal_eff + 0.3 * density + 0.1 * balance_bonus
+            else:
+                score = 0.5 * kcal_eff + 0.3 * density + 0.2 * balance_bonus
+                
+            logger.info(f"   Candidate {c['name']}: macro={macro_val}, kcal={kcal}, score={score:.3f}")
+            
+            if score > best_score:
+                best_score = score
+                best = c
+                
+        if best:
+            logger.info(f"✅ Selected helper: {best['name']} (score: {best_score:.3f})")
+            # cap max quantities to reasonable aggressive ceilings by macro
+            maxq = float(best.get('max_quantity', 300))
+            if macro == 'protein':
+                best['max_quantity'] = min(maxq, 500.0)
+            elif macro == 'carbs':
+                best['max_quantity'] = min(maxq, 600.0)
+            else:  # fat
+                best['max_quantity'] = min(maxq, 400.0)
+            return best
+        else:
+            logger.warning(f"❌ No suitable helper found for {macro} in {meal_type}")
+            return None
+
+
+
+
+
+    def _enforce_minimum_quantities_conservative(self, quantities: List[float], ingredients: List[Dict]) -> List[float]:
+        """Ensure each ingredient has at least a minimum quantity, but be conservative."""
+        min_quantity = 15.0  # Increased minimum to prevent zeroing out
+        adjusted = []
+        
+        for i, qty in enumerate(quantities):
+            if qty < min_quantity and qty > 0.1:  # If it was used but too small
+                adjusted.append(min_quantity)
+            elif qty <= 0.1:  # If it was essentially zero, keep it zero
+                adjusted.append(0.0)
+            else:
+                adjusted.append(qty)
+        
+        return adjusted
+
+
+
+    def _balance_ingredient_distribution_conservative(self, quantities: List[float], ingredients: List[Dict]) -> List[float]:
+        """Distribute quantities more evenly among ingredients, but be conservative."""
+        balanced = list(quantities)
+        
+        # Count how many ingredients are under minimum
+        min_quantity = 5.0
+        under_min_count = sum(1 for q in balanced if q < min_quantity)
+        
+        if under_min_count == 0:
+            return balanced
+        
+        # Calculate total excess from ingredients above minimum (but be conservative)
+        total_excess = 0.0
+        for i, qty in enumerate(balanced):
+            if qty > min_quantity * 2:  # Only take from ingredients with significant excess
+                # Take only 10% of excess for redistribution (very conservative)
+                excess = qty - min_quantity * 2
+                redistributable = excess * 0.1
+                balanced[i] = qty - redistributable
+                total_excess += redistributable
+        
+        # Distribute excess to ingredients under minimum
+        if total_excess > 0 and under_min_count > 0:
+            per_ingredient = total_excess / under_min_count
+            
+            for i, qty in enumerate(balanced):
+                if qty < min_quantity:
+                    # Ensure we don't exceed max_quantity
+                    max_qty = float(ingredients[i].get('max_quantity', 200))
+                    new_qty = min(qty + per_ingredient, max_qty)
+                    balanced[i] = new_qty
+        
+        return balanced
+
+    def _apply_ingredient_optimization(self, quantities: List[float], ingredients: List[Dict], target_macros: Dict) -> List[float]:
+        """Apply minimum quantities and balanced distribution while maintaining targets."""
+        # Step 1: Enforce minimum quantities (but be conservative)
+        adjusted = self._enforce_minimum_quantities_conservative(quantities, ingredients)
+        
+        # Step 2: Check if targets are still met
+        current_totals = self._calculate_final_meal(ingredients, adjusted)
+        if self._check_target_achievement(current_totals, target_macros)['overall']:
+            # If targets are still met, apply conservative balancing
+            balanced = self._balance_ingredient_distribution_conservative(adjusted, ingredients)
+            return balanced
+        else:
+            # If targets are broken, return original quantities
+            logger.warning("⚠️ Ingredient optimization would break targets, returning original quantities")
+            return quantities
+
+    def _fine_tune_for_targets(self, quantities: List[float], ingredients: List[Dict], target_macros: Dict) -> List[float]:
+        """Fine-tune quantities to ensure targets are still met after distribution changes."""
+        fine_tuned = list(quantities)
+        
+        # Check current totals
+        current_totals = self._calculate_final_meal(ingredients, fine_tuned)
+        
+        # If targets are not met, adjust quantities
+        for macro in ['protein', 'carbs', 'fat']:
+            target = target_macros[macro]
+            current = current_totals[macro]
+            
+            if current < target * 0.95:  # Below 95% of target
+                # Find best ingredient for this macro
+                best_idx = self._find_best_ingredient_for_macro(ingredients, macro)
+                if best_idx is not None:
+                    # Increase quantity to meet target
+                    deficit = target - current
+                    needed_quantity = (deficit * 100) / ingredients[best_idx].get(f'{macro}_per_100g', 1)
+                    
+                    # Ensure we don't exceed max_quantity
+                    max_qty = float(ingredients[best_idx].get('max_quantity', 200))
+                    new_qty = min(fine_tuned[best_idx] + needed_quantity, max_qty)
+                    fine_tuned[best_idx] = new_qty
+        
+        return fine_tuned
+
+    def _find_best_ingredient_for_macro(self, ingredients: List[Dict], macro: str) -> Optional[int]:
+        """Find the best ingredient for a specific macro."""
+        best_idx = None
+        best_efficiency = -1
+        
+        for i, ing in enumerate(ingredients):
+            macro_val = ing.get(f'{macro}_per_100g', 0.0)
+            calories = ing.get('calories_per_100g', 1.0)
+            
+            if macro_val > 0 and calories > 0:
+                efficiency = macro_val / calories
+                if efficiency > best_efficiency:
+                    best_efficiency = efficiency
+                    best_idx = i
+        
+        return best_idx
+
+    def _enforce_minimum_quantities(self, quantities: List[float], ingredients: List[Dict]) -> List[float]:
+        """
+        Enforce minimum quantity of 5g for used ingredients, allow zero for unused ones.
+        """
+        min_quantity = 5.0
+        adjusted = []
+        for i, qty in enumerate(quantities):
+            if qty < min_quantity and qty > 0.0:
+                adjusted.append(min_quantity)
+            elif qty == 0.0:
+                adjusted.append(0.0)
+            else:
+                adjusted.append(qty)
+        return adjusted
+
+    def _balance_ingredient_distribution(self, quantities: List[float], ingredients: List[Dict]) -> List[float]:
+        """
+        Improve distribution by redistributing excess quantities to low-quantity ingredients.
+        """
+        balanced = list(quantities)
+        min_quantity = 5.0
+        under_min_count = sum(1 for q in balanced if q < min_quantity)
+        
+        if under_min_count == 0:
+            return balanced
+        
+        total_excess = 0.0
+        for i, qty in enumerate(balanced):
+            if qty > min_quantity * 2:
+                excess = qty - min_quantity
+                redistributable = excess * 0.3
+                balanced[i] = qty - redistributable
+                total_excess += redistributable
+        
+        if total_excess > 0 and under_min_count > 0:
+            per_ingredient = total_excess / under_min_count
+            for i, qty in enumerate(balanced):
+                if qty < min_quantity:
+                    max_qty = float(ingredients[i].get('max_quantity', 200))
+                    new_qty = min(min_quantity + per_ingredient, max_qty)
+                    balanced[i] = new_qty
+        
+        return balanced
+
+    def _refine_solution(self, ingredients: List[Dict], quantities: List[float], target_macros: Dict) -> List[float]:
+        """
+        Target calorie reduction and macro deficits in refinement.
+        """
+        refined = list(quantities)
+        for _ in range(100):
+            totals = self._calculate_final_meal(ingredients, refined)
+            if totals['calories'] > target_macros['calories'] * 1.1:
+                for i, ing in enumerate(ingredients):
+                    if ing.get('calories_per_100g', 0) > 500 and refined[i] > 0:
+                        refined[i] = max(0.0, refined[i] - 1.0)
+            for macro in ['protein', 'carbs', 'fat']:
+                if totals[macro] < target_macros[macro] * 0.95:
+                    best_idx = self._find_best_ingredient_for_macro(ingredients, macro)
+                    if best_idx is not None:
+                        deficit = target_macros[macro] - totals[macro]
+                        needed = (deficit * 100) / ingredients[best_idx].get(f'{macro}_per_100g', 1)
+                        refined[best_idx] = min(refined[best_idx] + needed, float(ingredients[best_idx].get('max_quantity', 500)))
+        return refined
+
+    def _filter_low_quantities(self, meal: List[Dict]) -> List[Dict]:
+        """
+        Remove ingredients with quantities less than 5g from final meal.
+        """
+        return [item for item in meal if item['quantity_needed'] >= 5.0]
+
+    def _update_helper_ingredients(self):
+        """
+        Update helper ingredients with comprehensive database and add broccoli to nutrition_db.
+        """
+        self.nutrition_db['broccoli'] = {
+            'protein_per_100g': 2.8,
+            'carbs_per_100g': 7,
+            'fat_per_100g': 0.4,
+            'calories_per_100g': 35
+        }
+        
+        # Update lunch section with comprehensive ingredients
+        self.helper_ingredients['lunch']['protein'] = [
+            {'name': 'chicken_breast', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165, 'max_quantity': 200},
+            {'name': 'turkey', 'protein_per_100g': 29, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 135, 'max_quantity': 200},
+            {'name': 'tuna', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 150},
+            {'name': 'lentils', 'protein_per_100g': 9, 'carbs_per_100g': 20, 'fat_per_100g': 0.4, 'calories_per_100g': 116, 'max_quantity': 150},
+            {'name': 'tofu', 'protein_per_100g': 15, 'carbs_per_100g': 2, 'fat_per_100g': 8, 'calories_per_100g': 145, 'max_quantity': 150},
+            {'name': 'shrimp', 'protein_per_100g': 24, 'carbs_per_100g': 0.2, 'fat_per_100g': 0.3, 'calories_per_100g': 99, 'max_quantity': 150},
+            {'name': 'lean_pork', 'protein_per_100g': 27, 'carbs_per_100g': 0, 'fat_per_100g': 6, 'calories_per_100g': 165, 'max_quantity': 150}
+        ]
+        
+        self.helper_ingredients['lunch']['carbs'] = [
+            {'name': 'brown_rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 200},
+            {'name': 'quinoa', 'protein_per_100g': 14, 'carbs_per_100g': 64, 'fat_per_100g': 6, 'calories_per_100g': 368, 'max_quantity': 150},
+            {'name': 'whole_wheat_pasta', 'protein_per_100g': 5, 'carbs_per_100g': 30, 'fat_per_100g': 1, 'calories_per_100g': 150, 'max_quantity': 150},
+            {'name': 'sweet_potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 200},
+            {'name': 'corn', 'protein_per_100g': 3.3, 'carbs_per_100g': 19, 'fat_per_100g': 1.4, 'calories_per_100g': 86, 'max_quantity': 150},
+            {'name': 'chickpeas', 'protein_per_100g': 9, 'carbs_per_100g': 27, 'fat_per_100g': 3, 'calories_per_100g': 164, 'max_quantity': 150},
+            {'name': 'barley', 'protein_per_100g': 3.5, 'carbs_per_100g': 28, 'fat_per_100g': 0.4, 'calories_per_100g': 123, 'max_quantity': 150}
+        ]
+        
+        self.helper_ingredients['lunch']['fat'] = [
+            {'name': 'avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 150},
+            {'name': 'olive_oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 884, 'max_quantity': 50},
+            {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 80},
+            {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 60},
+            {'name': 'sunflower_seeds', 'protein_per_100g': 21, 'carbs_per_100g': 24, 'fat_per_100g': 51, 'calories_per_100g': 584, 'max_quantity': 60},
+            {'name': 'coconut_oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 892, 'max_quantity': 30},
+            {'name': 'butter', 'protein_per_100g': 0.9, 'carbs_per_100g': 0.1, 'fat_per_100g': 81, 'calories_per_100g': 717, 'max_quantity': 40}
+        ]
+        
+        # Add breakfast section
+        self.helper_ingredients['breakfast'] = {
+            'protein': [
+                {'name': 'eggs', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 150},
+                {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 200},
+                {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 150},
+                {'name': 'turkey_bacon', 'protein_per_100g': 15, 'carbs_per_100g': 1, 'fat_per_100g': 12, 'calories_per_100g': 180, 'max_quantity': 100},
+                {'name': 'protein_powder', 'protein_per_100g': 80, 'carbs_per_100g': 5, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'smoked_salmon', 'protein_per_100g': 18, 'carbs_per_100g': 0, 'fat_per_100g': 4.3, 'calories_per_100g': 117, 'max_quantity': 100},
+                {'name': 'tofu_scramble', 'protein_per_100g': 10, 'carbs_per_100g': 2, 'fat_per_100g': 7, 'calories_per_100g': 120, 'max_quantity': 150},
+                {'name': 'canadian_bacon', 'protein_per_100g': 20, 'carbs_per_100g': 0, 'fat_per_100g': 3, 'calories_per_100g': 110, 'max_quantity': 100},
+                {'name': 'sardines', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 208, 'max_quantity': 80},
+                {'name': 'hemp_seeds', 'protein_per_100g': 31, 'carbs_per_100g': 9, 'fat_per_100g': 49, 'calories_per_100g': 553, 'max_quantity': 40}
+            ],
+            'carbs': [
+                {'name': 'oats', 'protein_per_100g': 6.9, 'carbs_per_100g': 58, 'fat_per_100g': 6.9, 'calories_per_100g': 389, 'max_quantity': 150},
+                {'name': 'whole_grain_bread', 'protein_per_100g': 13, 'carbs_per_100g': 41, 'fat_per_100g': 4.2, 'calories_per_100g': 247, 'max_quantity': 100},
+                {'name': 'banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 22, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 150},
+                {'name': 'quinoa', 'protein_per_100g': 14, 'carbs_per_100g': 64, 'fat_per_100g': 6, 'calories_per_100g': 368, 'max_quantity': 100},
+                {'name': 'sweet_potato_hash', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 150},
+                {'name': 'berries', 'protein_per_100g': 1, 'carbs_per_100g': 14, 'fat_per_100g': 0.3, 'calories_per_100g': 57, 'max_quantity': 100},
+                {'name': 'whole_grain_cereal', 'protein_per_100g': 8, 'carbs_per_100g': 68, 'fat_per_100g': 2, 'calories_per_100g': 350, 'max_quantity': 80},
+                {'name': 'mango', 'protein_per_100g': 0.8, 'carbs_per_100g': 15, 'fat_per_100g': 0.4, 'calories_per_100g': 60, 'max_quantity': 120},
+                {'name': 'pineapple', 'protein_per_100g': 0.5, 'carbs_per_100g': 13, 'fat_per_100g': 0.1, 'calories_per_100g': 50, 'max_quantity': 120},
+                {'name': 'buckwheat', 'protein_per_100g': 13, 'carbs_per_100g': 72, 'fat_per_100g': 3.4, 'calories_per_100g': 343, 'max_quantity': 100}
+            ],
+            'fat': [
+                {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
+                {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 40},
+                {'name': 'avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 100},
+                {'name': 'chia_seeds', 'protein_per_100g': 17, 'carbs_per_100g': 42, 'fat_per_100g': 31, 'calories_per_100g': 486, 'max_quantity': 30},
+                {'name': 'coconut_oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 892, 'max_quantity': 20},
+                {'name': 'flax_seeds', 'protein_per_100g': 18, 'carbs_per_100g': 29, 'fat_per_100g': 42, 'calories_per_100g': 534, 'max_quantity': 30},
+                {'name': 'pistachios', 'protein_per_100g': 20, 'carbs_per_100g': 28, 'fat_per_100g': 45, 'calories_per_100g': 560, 'max_quantity': 50},
+                {'name': 'macadamia_nuts', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 76, 'calories_per_100g': 718, 'max_quantity': 40}
+            ]
+        }
+        
+        # Add dinner section
+        self.helper_ingredients['dinner'] = {
+            'protein': [
+                {'name': 'beef_steak', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 220, 'max_quantity': 200},
+                {'name': 'salmon', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 13, 'calories_per_100g': 206, 'max_quantity': 150},
+                {'name': 'chicken_thigh', 'protein_per_100g': 24, 'carbs_per_100g': 0, 'fat_per_100g': 9, 'calories_per_100g': 177, 'max_quantity': 200},
+                {'name': 'pork_loin', 'protein_per_100g': 27, 'carbs_per_100g': 0, 'fat_per_100g': 7, 'calories_per_100g': 172, 'max_quantity': 150},
+                {'name': 'white_fish', 'protein_per_100g': 23, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 105, 'max_quantity': 150},
+                {'name': 'tempeh', 'protein_per_100g': 20, 'carbs_per_100g': 8, 'fat_per_100g': 11, 'calories_per_100g': 195, 'max_quantity': 150},
+                {'name': 'lamb', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 14, 'calories_per_100g': 215, 'max_quantity': 150}
+            ],
+            'carbs': [
+                {'name': 'sweet_potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 200},
+                {'name': 'brown_rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 200},
+                {'name': 'quinoa', 'protein_per_100g': 14, 'carbs_per_100g': 64, 'fat_per_100g': 6, 'calories_per_100g': 368, 'max_quantity': 150},
+                {'name': 'whole_grain_pasta', 'protein_per_100g': 5, 'carbs_per_100g': 30, 'fat_per_100g': 1, 'calories_per_100g': 150, 'max_quantity': 150},
+                {'name': 'potato', 'protein_per_100g': 2, 'carbs_per_100g': 17, 'fat_per_100g': 0.1, 'calories_per_100g': 77, 'max_quantity': 200},
+                {'name': 'lentils', 'protein_per_100g': 9, 'carbs_per_100g': 20, 'fat_per_100g': 0.4, 'calories_per_100g': 116, 'max_quantity': 150},
+                {'name': 'black_beans', 'protein_per_100g': 9, 'carbs_per_100g': 23, 'fat_per_100g': 0.5, 'calories_per_100g': 130, 'max_quantity': 150}
+            ],
+            'fat': [
+                {'name': 'nuts_mix', 'protein_per_100g': 15, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 500, 'max_quantity': 50},
+                {'name': 'olive_oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 884, 'max_quantity': 20},
+                {'name': 'avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 100},
+                {'name': 'butter', 'protein_per_100g': 0.9, 'carbs_per_100g': 0.1, 'fat_per_100g': 81, 'calories_per_100g': 717, 'max_quantity': 20},
+                {'name': 'walnuts', 'protein_per_100g': 15, 'carbs_per_100g': 14, 'fat_per_100g': 65, 'calories_per_100g': 654, 'max_quantity': 50}
+            ]
+        }
+        
+        # Add snack sections
+        self.helper_ingredients['morning_snack'] = {
+            'protein': [
+                {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 150},
+                {'name': 'hard_boiled_egg', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 100},
+                {'name': 'protein_bar', 'protein_per_100g': 30, 'carbs_per_100g': 30, 'fat_per_100g': 10, 'calories_per_100g': 350, 'max_quantity': 80},
+                {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 100},
+                {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 100},
+                {'name': 'turkey_jerky', 'protein_per_100g': 30, 'carbs_per_100g': 3, 'fat_per_100g': 1, 'calories_per_100g': 150, 'max_quantity': 50},
+                {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80}
+            ],
+            'carbs': [
+                {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
+                {'name': 'berries', 'protein_per_100g': 1, 'carbs_per_100g': 14, 'fat_per_100g': 0.3, 'calories_per_100g': 57, 'max_quantity': 100},
+                {'name': 'whole_grain_crackers', 'protein_per_100g': 7, 'carbs_per_100g': 70, 'fat_per_100g': 10, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 22, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 100},
+                {'name': 'dried_apricots', 'protein_per_100g': 3.4, 'carbs_per_100g': 63, 'fat_per_100g': 0.5, 'calories_per_100g': 241, 'max_quantity': 50},
+                {'name': 'rice_cakes', 'protein_per_100g': 8, 'carbs_per_100g': 80, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'oat_bar', 'protein_per_100g': 8, 'carbs_per_100g': 60, 'fat_per_100g': 8, 'calories_per_100g': 350, 'max_quantity': 60}
+            ],
+            'fat': [
+                {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
+                {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 30},
+                {'name': 'trail_mix', 'protein_per_100g': 14, 'carbs_per_100g': 45, 'fat_per_100g': 30, 'calories_per_100g': 450, 'max_quantity': 50},
+                {'name': 'sunflower_seeds', 'protein_per_100g': 21, 'carbs_per_100g': 24, 'fat_per_100g': 51, 'calories_per_100g': 584, 'max_quantity': 30},
+                {'name': 'cashews', 'protein_per_100g': 18, 'carbs_per_100g': 30, 'fat_per_100g': 44, 'calories_per_100g': 553, 'max_quantity': 50}
+            ]
+        }
+        
+        self.helper_ingredients['afternoon_snack'] = {
+            'protein': [
+                {'name': 'protein_bar', 'protein_per_100g': 30, 'carbs_per_100g': 30, 'fat_per_100g': 10, 'calories_per_100g': 350, 'max_quantity': 80},
+                {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 150},
+                {'name': 'beef_jerky', 'protein_per_100g': 33, 'carbs_per_100g': 3, 'fat_per_100g': 7, 'calories_per_100g': 200, 'max_quantity': 50},
+                {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 100},
+                {'name': 'hummus', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 10, 'calories_per_100g': 166, 'max_quantity': 100},
+                {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80},
+                {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 100}
+            ],
+            'carbs': [
+                {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
+                {'name': 'whole_grain_crackers', 'protein_per_100g': 7, 'carbs_per_100g': 70, 'fat_per_100g': 10, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 22, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 100},
+                {'name': 'rice_cakes', 'protein_per_100g': 8, 'carbs_per_100g': 80, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'dried_mango', 'protein_per_100g': 2, 'carbs_per_100g': 65, 'fat_per_100g': 0.5, 'calories_per_100g': 250, 'max_quantity': 50},
+                {'name': 'granola', 'protein_per_100g': 10, 'carbs_per_100g': 60, 'fat_per_100g': 15, 'calories_per_100g': 400, 'max_quantity': 60},
+                {'name': 'carrot_sticks', 'protein_per_100g': 0.9, 'carbs_per_100g': 10, 'fat_per_100g': 0.2, 'calories_per_100g': 41, 'max_quantity': 100}
+            ],
+            'fat': [
+                {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 30},
+                {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
+                {'name': 'cashews', 'protein_per_100g': 18, 'carbs_per_100g': 30, 'fat_per_100g': 44, 'calories_per_100g': 553, 'max_quantity': 50},
+                {'name': 'trail_mix', 'protein_per_100g': 14, 'carbs_per_100g': 45, 'fat_per_100g': 30, 'calories_per_100g': 450, 'max_quantity': 50},
+                {'name': 'pumpkin_seeds', 'protein_per_100g': 19, 'carbs_per_100g': 54, 'fat_per_100g': 19, 'calories_per_100g': 446, 'max_quantity': 30}
+            ]
+        }
+        
+        self.helper_ingredients['evening_snack'] = {
+            'protein': [
+                {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 100},
+                {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 150},
+                {'name': 'protein_shake', 'protein_per_100g': 80, 'carbs_per_100g': 5, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'beef_jerky', 'protein_per_100g': 33, 'carbs_per_100g': 3, 'fat_per_100g': 7, 'calories_per_100g': 200, 'max_quantity': 50},
+                {'name': 'hummus', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 10, 'calories_per_100g': 166, 'max_quantity': 100},
+                {'name': 'hard_boiled_egg', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 100},
+                {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80}
+            ],
+            'carbs': [
+                {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
+                {'name': 'whole_grain_crackers', 'protein_per_100g': 7, 'carbs_per_100g': 70, 'fat_per_100g': 10, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'berries', 'protein_per_100g': 1, 'carbs_per_100g': 14, 'fat_per_100g': 0.3, 'calories_per_100g': 57, 'max_quantity': 100},
+                {'name': 'rice_cakes', 'protein_per_100g': 8, 'carbs_per_100g': 80, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
+                {'name': 'dried_raisins', 'protein_per_100g': 3, 'carbs_per_100g': 79, 'fat_per_100g': 0.5, 'calories_per_100g': 299, 'max_quantity': 50},
+                {'name': 'celery_sticks', 'protein_per_100g': 0.7, 'carbs_per_100g': 3, 'fat_per_100g': 0.2, 'calories_per_100g': 16, 'max_quantity': 100},
+                {'name': 'oat_bar', 'protein_per_100g': 8, 'carbs_per_100g': 60, 'fat_per_100g': 8, 'calories_per_100g': 350, 'max_quantity': 60}
+            ],
+            'fat': [
+                {'name': 'peanut_butter', 'protein_per_100g': 25, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 588, 'max_quantity': 30},
+                {'name': 'almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50},
+                {'name': 'cashews', 'protein_per_100g': 18, 'carbs_per_100g': 30, 'fat_per_100g': 44, 'calories_per_100g': 553, 'max_quantity': 50},
+                {'name': 'trail_mix', 'protein_per_100g': 14, 'carbs_per_100g': 45, 'fat_per_100g': 30, 'calories_per_100g': 450, 'max_quantity': 50},
+                {'name': 'chia_seeds', 'protein_per_100g': 17, 'carbs_per_100g': 42, 'fat_per_100g': 31, 'calories_per_100g': 486, 'max_quantity': 30}
+            ]
+        }

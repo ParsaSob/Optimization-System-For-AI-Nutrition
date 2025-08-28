@@ -1,134 +1,251 @@
-# Advanced Optimization Algorithms for RAG Meal Optimization
+# Advanced RAG Optimization Methods
 
-## 🚀 Overview
+## Overview
 
-This system implements state-of-the-art optimization algorithms for meal planning and nutritional optimization, replacing the previous simple algorithms with sophisticated mathematical optimization techniques.
+The RAG Meal Optimizer now implements 5 advanced optimization methods that provide superior results compared to simple scaling approaches. Each method has unique strengths and is automatically selected based on performance.
 
-## 🧠 Key Features
+## 🎯 The 5 Optimization Methods
 
-### 1. **Intelligent Ingredient Selection**
-- **Smart Categorization**: Automatically categorizes ingredients by macro type (protein, carbs, fat, vegetables)
-- **Duplicate Prevention**: Avoids adding ingredients that are already present in RAG suggestions
-- **Realistic Limits**: Enforces maximum quantities based on practical consumption limits
-- **Efficiency Scoring**: Selects ingredients based on macro content per calorie efficiency
+### 1. Linear Optimization with PuLP
 
-### 2. **Advanced Optimization Algorithms**
+**Method**: `_linear_optimize_pulp()`
 
-#### **Linear Optimization (PuLP)**
-- **Method**: Mathematical linear programming
-- **Best For**: Linear constraints and objectives
-- **Advantage**: Guaranteed optimal solution
-- **Use Case**: When all constraints can be expressed linearly
+**Description**: Uses linear programming to find the mathematically optimal solution for meal optimization.
 
-#### **Differential Evolution (SciPy)**
-- **Method**: Evolutionary algorithm for continuous optimization
-- **Best For**: Non-linear, non-differentiable problems
-- **Advantage**: Robust global optimization
-- **Use Case**: Complex nutritional constraints
+**How it works**:
+- Creates a linear optimization problem with PuLP
+- Variables: grams of each ingredient (x₁, x₂, ..., xₙ)
+- Objective: Minimize total calories
+- Constraints: Meet minimum protein, carbs, and fat requirements
+- Solver: CBC (Coin-OR Branch and Cut) solver
 
-#### **Genetic Algorithm**
-- **Method**: Population-based evolutionary algorithm
-- **Best For**: Multi-modal optimization problems
-- **Advantage**: Good exploration of solution space
-- **Use Case**: When multiple good solutions exist
+**Mathematical Formulation**:
+```
+Minimize: Σ(cᵢ × xᵢ)  # Total calories
+Subject to:
+  Σ(pᵢ × xᵢ) ≥ P_target  # Protein constraint
+  Σ(cbᵢ × xᵢ) ≥ C_target  # Carbs constraint  
+  Σ(fᵢ × xᵢ) ≥ F_target   # Fat constraint
+  0 ≤ xᵢ ≤ max_qtyᵢ       # Quantity bounds
+```
 
-#### **Optuna Optimization**
-- **Method**: Bayesian optimization with Tree-structured Parzen Estimator (TPE)
-- **Best For**: Hyperparameter optimization and black-box functions
-- **Advantage**: Efficient sampling strategy
-- **Use Case**: Complex objective functions
+**Strengths**:
+- ✅ Guaranteed optimal solution
+- ✅ Fast execution for linear problems
+- ✅ Precise constraint satisfaction
+- ✅ Mathematical rigor
 
-#### **Hybrid Optimization (DE + GA)**
-- **Method**: Combines Differential Evolution and Genetic Algorithm
-- **Best For**: Complex optimization problems
-- **Advantage**: Best of both worlds (exploration + exploitation)
-- **Use Case**: When high-quality solutions are required
+**Best for**: Linear nutritional relationships, precise macro targeting
 
-### 3. **Realistic Quantity Constraints**
-- **Protein Sources**: Max 300g (chicken, fish), 250g (beef, pork), 200g (legumes)
-- **Carb Sources**: Max 300g (grains, potatoes), 200g (fruits, bread)
-- **Fat Sources**: Max 30g (oils), 100g (nuts), 80g (butters)
-- **Vegetables**: Max 300g (most), 50g (garlic, ginger)
+---
 
-## 📊 How It Works
+### 2. Genetic Algorithm with DEAP
 
-### **Phase 1: Ingredient Analysis**
-1. **RAG Ingredient Extraction**: Parses ingredients from RAG system response
-2. **Deficit Calculation**: Determines missing macros (protein, carbs, fat, calories)
-3. **Category Identification**: Identifies existing macro categories in RAG ingredients
+**Method**: `_genetic_algorithm_optimize()`
 
-### **Phase 2: Smart Supplementation**
-1. **Gap Analysis**: Identifies which macro categories are missing
-2. **Efficient Selection**: Chooses ingredients with highest macro-to-calorie ratio
-3. **Quantity Calculation**: Determines exact amounts needed to fill deficits
-4. **Limit Enforcement**: Ensures quantities stay within realistic bounds
+**Description**: Evolutionary algorithm that mimics natural selection to find near-optimal solutions.
 
-### **Phase 3: Advanced Optimization**
-1. **Multi-Algorithm Execution**: Runs all 5 optimization algorithms in parallel
-2. **Result Evaluation**: Scores each solution based on target achievement
-3. **Best Selection**: Chooses the algorithm with the lowest penalty score
-4. **Fallback Handling**: Uses simple scaling if all algorithms fail
+**How it works**:
+- **Population**: 100 individuals, each representing ingredient quantities
+- **Selection**: Tournament selection (3-way competition)
+- **Crossover**: Blend crossover (α=0.5) for mating
+- **Mutation**: Gaussian mutation (σ=50) for diversity
+- **Generations**: 50 evolution cycles
+- **Fitness**: Calories + penalty for constraint violations
 
-## 🔧 Installation
+**Algorithm Flow**:
+```
+Initialize population → Evaluate fitness → Select parents → 
+Crossover → Mutate → Evaluate offspring → Replace population → Repeat
+```
 
-### **Required Dependencies**
+**Strengths**:
+- ✅ Handles non-linear relationships
+- ✅ Global search capability
+- ✅ Robust to local optima
+- ✅ Adaptable to complex constraints
+
+**Best for**: Non-linear optimization, complex nutritional interactions
+
+---
+
+### 3. Differential Evolution with SciPy
+
+**Method**: `_differential_evolution_optimize()`
+
+**Description**: Population-based evolutionary algorithm specifically designed for continuous optimization.
+
+**How it works**:
+- **Population**: 15 individuals
+- **Mutation**: Differential mutation (F=0.5)
+- **Crossover**: Binomial crossover (CR=0.7)
+- **Iterations**: 100 maximum iterations
+- **Cost Function**: Calories + squared penalty for constraints
+
+**Differential Mutation Formula**:
+```
+v = x₁ + F × (x₂ - x₃)
+```
+Where F is the differential weight and x₁, x₂, x₃ are random population members.
+
+**Strengths**:
+- ✅ Excellent for continuous variables
+- ✅ Fast convergence
+- ✅ Good balance of exploration/exploitation
+- ✅ Robust parameter tuning
+
+**Best for**: Continuous optimization, smooth objective functions
+
+---
+
+### 4. Hybrid Optimization (GA + DE)
+
+**Method**: `_hybrid_optimize()`
+
+**Description**: Combines the exploration power of GA with the refinement capability of DE.
+
+**How it works**:
+1. **Phase 1**: Run Genetic Algorithm to find good initial solution
+2. **Phase 2**: Use GA result to initialize DE population
+3. **Phase 3**: Run Differential Evolution for refinement
+4. **Fallback**: If DE fails, return GA result
+
+**Hybrid Strategy**:
+```
+GA (Exploration) → Best Solution → DE Initialization → DE (Refinement) → Final Result
+```
+
+**Strengths**:
+- ✅ Best of both worlds
+- ✅ GA provides good starting point
+- ✅ DE refines the solution
+- ✅ Robust fallback mechanism
+
+**Best for**: Complex optimization problems requiring both exploration and precision
+
+---
+
+### 5. Optuna Optimization
+
+**Method**: `_optuna_optimize()`
+
+**Description**: Hyperparameter optimization framework adapted for direct meal optimization.
+
+**How it works**:
+- **Trials**: 100 optimization trials
+- **Sampling**: Tree-structured Parzen Estimator (TPE)
+- **Objective**: Minimize calories + penalty
+- **Parameter Space**: Continuous bounds for each ingredient quantity
+- **Pruning**: Automatic trial pruning for efficiency
+
+**Optuna Features**:
+- Adaptive sampling based on previous results
+- Efficient search space exploration
+- Built-in visualization capabilities
+- Parallel optimization support
+
+**Strengths**:
+- ✅ Intelligent sampling strategy
+- ✅ Excellent for high-dimensional problems
+- ✅ Built-in optimization history
+- ✅ Extensible framework
+
+**Best for**: High-dimensional optimization, adaptive sampling
+
+---
+
+## 🔧 Installation Requirements
+
+To use all optimization methods, install the required libraries:
+
 ```bash
 pip install -r requirements_advanced.txt
 ```
 
-### **Core Requirements**
-- `numpy` >= 1.21.0
-- `scipy` >= 1.7.0
-- `optuna` >= 3.0.0
+Or install individually:
 
-### **Optional Dependencies**
-- `pulp` >= 2.7.0 (for linear optimization)
-- `pandas` >= 1.3.0 (for data handling)
-- `numba` >= 0.56.0 (for performance)
+```bash
+pip install pulp deap scipy optuna numpy
+```
 
-## 📝 Usage Example
+## 📊 Method Selection & Evaluation
+
+### Automatic Method Selection
+
+The system automatically runs all available methods and selects the best result based on:
+
+1. **Constraint Satisfaction**: How well macro targets are met
+2. **Calorie Efficiency**: Lower calories for same nutrition
+3. **Solution Quality**: Realistic ingredient quantities
+4. **Computation Time**: Faster methods preferred
+
+### Scoring Algorithm
 
 ```python
-from rag_optimization_engine import RAGMealOptimizer
+def calculate_optimization_score(actual, target):
+    score = 0
+    for macro in ['calories', 'protein', 'carbs', 'fat']:
+        target_val = target[macro]
+        actual_val = actual[macro]
+        
+        if target_val > 0:
+            if actual_val > target_val:
+                # Penalize over-target (5x penalty)
+                diff = (actual_val - target_val) / target_val
+                score += diff * diff * 5
+            else:
+                # Penalize under-target
+                diff = (target_val - actual_val) / target_val
+                score += diff * diff
+    
+    return score  # Lower is better
+```
 
-# Initialize optimizer
+## 🚀 Performance Characteristics
+
+| Method | Speed | Precision | Robustness | Best Use Case |
+|--------|-------|-----------|------------|---------------|
+| **PuLP** | ⚡⚡⚡⚡⚡ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | Linear problems, exact solutions |
+| **DEAP GA** | ⚡⚡⚡ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | Complex constraints, global search |
+| **SciPy DE** | ⚡⚡⚡⚡ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | Continuous optimization |
+| **Hybrid** | ⚡⚡ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | Best overall performance |
+| **Optuna** | ⚡⚡⚡ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | High-dimensional problems |
+
+## 🔍 Usage Examples
+
+### Basic Usage
+
+```python
+from rag_optimization_engine_simple import RAGMealOptimizer
+
 optimizer = RAGMealOptimizer()
 
-# RAG response from your system
-rag_response = {
-    "suggestions": [{
-        "ingredients": [
-            {
-                "name": "chicken_breast",
-                "protein_per_100g": 31,
-                "carbs_per_100g": 0,
-                "fat_per_100g": 3.6,
-                "calories_per_100g": 165,
-                "quantity_needed": 150
-            }
-        ]
-    }]
-}
-
-# Target macros
-target_macros = {
-    "calories": 800,
-    "protein": 60,
-    "carbs": 80,
-    "fat": 25
-}
-
-# Run optimization
 result = optimizer.optimize_single_meal(
-    rag_response, 
-    target_macros, 
-    user_preferences, 
-    "lunch"
+    rag_response=rag_response,
+    target_macros=target_macros,
+    user_preferences={},
+    meal_type="lunch"
 )
 
-print(f"Best algorithm: {result['optimization_result']['method']}")
-print(f"Final meal: {len(result['meal'])} ingredients")
-print(f"Nutritional totals: {result['nutritional_totals']}")
+print(f"Best method: {result['optimization_result']['method']}")
+print(f"Targets achieved: {result['target_achievement']['overall']}")
+```
+
+### Method-Specific Testing
+
+```python
+# Test individual methods
+ingredients = [...]  # Your ingredient list
+target_macros = {...}  # Your macro targets
+
+# Test PuLP optimization
+pulp_result = optimizer._linear_optimize_pulp(ingredients, target_macros)
+
+# Test Genetic Algorithm
+ga_result = optimizer._genetic_algorithm_optimize(ingredients, target_macros)
+
+# Test Differential Evolution
+de_result = optimizer._differential_evolution_optimize(ingredients, target_macros)
 ```
 
 ## 🧪 Testing
@@ -136,135 +253,83 @@ print(f"Nutritional totals: {result['nutritional_totals']}")
 Run the comprehensive test suite:
 
 ```bash
-python test_advanced_optimization.py
+python test_simple_rag.py
 ```
 
-This will test:
-- All optimization algorithms
-- Different target macro combinations
-- Quantity validation
-- Performance metrics
+This will:
+- Test all available optimization methods
+- Show which libraries are available
+- Demonstrate the complete optimization pipeline
+- Provide installation guidance if needed
 
-## 📈 Performance Characteristics
+## 🔧 Troubleshooting
 
-### **Algorithm Performance**
-| Algorithm | Speed | Accuracy | Robustness |
-|-----------|-------|----------|------------|
-| Linear (PuLP) | ⚡⚡⚡⚡⚡ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
-| Differential Evolution | ⚡⚡⚡ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Genetic Algorithm | ⚡⚡ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
-| Optuna | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
-| Hybrid | ⚡⚡ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+### Common Issues
 
-### **Typical Execution Times**
-- **Small problems** (5-10 ingredients): 0.1-0.5 seconds
-- **Medium problems** (10-20 ingredients): 0.5-2.0 seconds
-- **Large problems** (20+ ingredients): 2.0-5.0 seconds
+1. **PuLP not available**: Install with `pip install pulp`
+2. **DEAP import errors**: Install with `pip install deap`
+3. **SciPy missing**: Install with `pip install scipy`
+4. **Optuna not found**: Install with `pip install optuna`
 
-## 🎯 Optimization Quality
+### Fallback Behavior
 
-### **Target Achievement Rates**
-- **Protein**: 95%+ achievement rate
-- **Carbs**: 95%+ achievement rate
-- **Fat**: 95%+ achievement rate
-- **Calories**: 95%+ achievement rate
+If any method fails, the system automatically:
+- Logs the error
+- Continues with other methods
+- Falls back to simple optimization if needed
+- Provides detailed error information
 
-### **Solution Quality Metrics**
-- **Macro Balance**: Optimal distribution of nutrients
-- **Calorie Efficiency**: Minimal excess calories
-- **Realistic Quantities**: All quantities within practical limits
-- **Ingredient Diversity**: Balanced selection across food groups
+## 📈 Advanced Configuration
 
-## 🔍 Technical Details
+### Customizing Method Parameters
 
-### **Penalty Function**
-The optimization uses a sophisticated penalty system:
 ```python
-penalty = 0
-if actual < target:
-    penalty += ((target - actual) / target) ** 2
-if actual > target:
-    penalty += ((actual - target) / target) ** 2 * 5  # 5x penalty for over-target
+# Adjust DEAP parameters
+optimizer.toolbox.register("population", tools.initRepeat, list, 
+                          optimizer.toolbox.individual, n=200)  # Larger population
+
+# Modify SciPy DE parameters
+result = differential_evolution(
+    cost, bounds,
+    popsize=30,        # Larger population
+    mutation=0.7,      # Higher mutation rate
+    recombination=0.8, # Higher crossover rate
+    maxiter=200        # More iterations
+)
 ```
 
-### **Convergence Criteria**
-- **Differential Evolution**: 100 iterations or convergence
-- **Genetic Algorithm**: 30-50 generations
-- **Optuna**: 100 trials
-- **Hybrid**: DE + 20 GA generations
+### Adding New Optimization Methods
 
-### **Fallback Strategy**
-If all advanced algorithms fail, the system automatically falls back to:
-1. Simple proportional scaling
-2. Quantity bounds enforcement
-3. Basic nutritional validation
+```python
+def _custom_optimize(self, ingredients, target_macros):
+    # Your custom optimization logic
+    pass
 
-## 🚨 Error Handling
+# Add to _run_optimization_methods
+if hasattr(self, '_custom_optimize'):
+    try:
+        result = self._custom_optimize(ingredients, target_macros)
+        results.append(result)
+    except Exception as e:
+        logger.warning(f"Custom optimization failed: {e}")
+```
 
-### **Common Issues & Solutions**
-1. **Import Errors**: Missing libraries fall back to available algorithms
-2. **Convergence Failures**: Automatic fallback to simpler methods
-3. **Constraint Violations**: Penalty-based approach handles infeasible problems
-4. **Memory Issues**: Efficient data structures and algorithms
+## 🎯 Best Practices
 
-### **Robustness Features**
-- **Exception Handling**: Each algorithm runs independently
-- **Fallback Mechanisms**: Multiple backup strategies
-- **Input Validation**: Comprehensive error checking
-- **Logging**: Detailed execution tracking
+1. **Library Installation**: Install all libraries for best performance
+2. **Method Selection**: Let the system automatically choose the best method
+3. **Error Handling**: Check for method availability before use
+4. **Performance Tuning**: Adjust parameters based on your specific use case
+5. **Monitoring**: Use logging to track which methods succeed/fail
 
 ## 🔮 Future Enhancements
 
-### **Planned Features**
-- **Machine Learning Integration**: Learn from user preferences
-- **Multi-Objective Optimization**: Balance nutrition, cost, and taste
-- **Real-Time Optimization**: Dynamic ingredient adjustment
-- **Cloud Optimization**: Distributed algorithm execution
-
-### **Performance Improvements**
-- **Parallel Execution**: Run algorithms simultaneously
-- **GPU Acceleration**: CUDA-based optimization
-- **Caching**: Store and reuse optimization results
-- **Adaptive Parameters**: Self-tuning algorithm parameters
-
-## 📚 References
-
-### **Academic Papers**
-- Differential Evolution: Storn & Price (1997)
-- Genetic Algorithms: Holland (1975)
-- Bayesian Optimization: Snoek et al. (2012)
-
-### **Libraries & Tools**
-- **SciPy**: Scientific computing and optimization
-- **Optuna**: Hyperparameter optimization framework
-- **PuLP**: Linear programming solver
-- **NumPy**: Numerical computing
-
-## 🤝 Contributing
-
-### **Development Setup**
-1. Clone the repository
-2. Install development dependencies
-3. Run tests: `python -m pytest`
-4. Submit pull requests
-
-### **Code Standards**
-- **Type Hints**: Full type annotation
-- **Documentation**: Comprehensive docstrings
-- **Testing**: 90%+ code coverage
-- **Performance**: Benchmark against baselines
+- **Machine Learning Integration**: Learn optimal method selection
+- **Parallel Execution**: Run methods simultaneously
+- **Custom Constraints**: User-defined optimization rules
+- **Performance Profiling**: Detailed timing and resource usage
+- **Method Chaining**: Sequential application of multiple methods
 
 ---
 
-## 🎉 Summary
-
-This advanced optimization system represents a significant upgrade from the previous simple algorithms, providing:
-
-- **5 sophisticated optimization algorithms**
-- **Intelligent ingredient selection**
-- **Realistic quantity constraints**
-- **Robust error handling**
-- **High-quality solutions**
-- **Professional-grade performance**
-
-The system automatically selects the best algorithm for each problem, ensuring optimal meal plans that meet nutritional targets while respecting practical constraints.
+The advanced optimization methods provide a robust, intelligent approach to meal optimization that automatically adapts to different problem types and constraints, ensuring the best possible results for your nutritional goals.

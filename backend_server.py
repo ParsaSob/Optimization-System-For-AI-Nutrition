@@ -455,9 +455,9 @@ def optimize_single_meal_rag_advanced():
         print(f"🚀 Starting optimization for {meal_type} meal...")
         print(f"🎯 Target macros: {target_macros}")
         
-        # Step 1: Run initial optimization with 4 methods
-        print("\n📊 Step 1: Running initial optimization with 4 methods...")
-        initial_result = rag_meal_optimizer.optimize_single_meal(
+        # Step 1: Run initial optimization with 5 methods using advanced method
+        print("\n📊 Step 1: Running initial optimization with 5 methods...")
+        initial_result = rag_meal_optimizer.optimize_single_meal_advanced(
             rag_response=rag_response,
             target_macros=target_macros,
             user_preferences=user_preferences,
@@ -465,66 +465,9 @@ def optimize_single_meal_rag_advanced():
             request_data=request_data
         )
         
-        # Check if targets are achieved
-        target_achievement = check_target_achievement_advanced(initial_result, target_macros)
-        print(f"📈 Initial optimization target achievement: {target_achievement}")
-        
-        # If targets are not achieved, add helper ingredients and re-optimize
-        if not target_achievement['overall']:
-            print(f"\n🔧 Step 2: Targets not fully achieved. Adding helper ingredients...")
-            
-            # Get current ingredients from initial result
-            current_ingredients = get_current_ingredients_from_result(initial_result)
-            
-            # Add helper ingredients based on deficits
-            helper_ingredients = add_smart_helper_ingredients(current_ingredients, target_macros, meal_type)
-            
-            if helper_ingredients:
-                print(f"➕ Added {len(helper_ingredients)} helper ingredients:")
-                for helper in helper_ingredients:
-                    print(f"  • {helper['name']}: {helper['protein_per_100g']}g protein, {helper['carbs_per_100g']}g carbs, {helper['fat_per_100g']}g fat")
-                
-                # Combine original and helper ingredients
-                all_ingredients = current_ingredients + helper_ingredients
-                
-                # Step 3: Re-optimize with all ingredients
-                print(f"\n🔄 Step 3: Re-optimizing with helper ingredients...")
-                final_result = rag_meal_optimizer._differential_evolution_optimize(
-                    all_ingredients, 
-                    target_macros
-                )
-                
-                # Calculate final nutrition and achievement
-                if final_result.get('success') and final_result.get('quantities'):
-                    final_nutrition = calculate_final_nutrition_with_helpers(all_ingredients, final_result['quantities'])
-                    final_result['final_nutrition'] = final_nutrition
-                    final_result['target_achievement'] = check_target_achievement(final_nutrition, target_macros)
-                    
-                    # Update the result
-                    initial_result['optimization_result'] = final_result
-                    initial_result['helper_ingredients_added'] = helper_ingredients
-                    initial_result['final_nutrition'] = final_nutrition
-                    initial_result['target_achievement'] = final_result['target_achievement']
-                    initial_result['optimization_steps'] = {
-                        'step1_initial': 'Completed with 4 methods',
-                        'step2_helpers': f'Added {len(helper_ingredients)} helper ingredients',
-                        'step3_reoptimization': 'Completed with SciPy differential evolution'
-                    }
-                    
-                    print(f"✅ Final optimization completed with helpers!")
-                    print(f"📊 Final nutrition: {final_nutrition}")
-                    print(f"🎯 Final target achievement: {final_result['target_achievement']}")
-                else:
-                    print(f"❌ Re-optimization failed: {final_result.get('error', 'Unknown error')}")
-            else:
-                print(f"ℹ️ No helper ingredients needed or available")
-        else:
-            print(f"✅ All targets achieved in initial optimization!")
-            initial_result['optimization_steps'] = {
-                'step1_initial': 'Completed with 4 methods - all targets achieved',
-                'step2_helpers': 'Not needed - targets already met',
-                'step3_reoptimization': 'Not needed - targets already met'
-            }
+        # The advanced method handles everything internally
+        print(f"✅ Advanced optimization completed!")
+        print(f"📊 Result: {initial_result.get('optimization_result', {}).get('method', 'Unknown method')}")
         
         return jsonify(initial_result)
         
@@ -609,7 +552,7 @@ def get_current_ingredients_from_result(result):
     return ingredients
 
 def add_smart_helper_ingredients(current_ingredients, target_macros, meal_type):
-    """Add smart helper ingredients based on meal type and deficits"""
+    """Add smart helper ingredients based on meal type and deficits with conflict prevention"""
     helpers = []
     
     # Calculate current totals from ingredients
@@ -631,91 +574,189 @@ def add_smart_helper_ingredients(current_ingredients, target_macros, meal_type):
     print(f"📊 Current totals: {current_totals}")
     print(f"🎯 Deficits: Protein: {protein_deficit:.1f}g, Carbs: {carbs_deficit:.1f}g, Fat: {fat_deficit:.1f}g, Calories: {calories_deficit:.1f}")
     
-    # Meal-specific helper ingredients
-    meal_helpers = get_meal_specific_helpers(meal_type)
+    # Analyze current ingredients to prevent conflicts
+    current_protein_sources = analyze_protein_sources(current_ingredients)
+    print(f"🔍 Current protein sources: {current_protein_sources}")
     
-    # Add protein helper if needed
+    # Get meal-specific helper ingredients with conflict prevention
+    meal_helpers = get_meal_specific_helpers_smart(meal_type, current_protein_sources)
+    
+    # Add protein helper if needed (with conflict prevention)
     if protein_deficit > 5:
-        protein_helper = meal_helpers.get('protein', {
-            'name': 'Protein Powder',
-            'protein_per_100g': 80,
-            'carbs_per_100g': 8,
-            'fat_per_100g': 2,
-            'calories_per_100g': 370,
-            'max_quantity': 100,
-            'category': 'protein_supplement'
-        })
-        helpers.append(protein_helper)
-        print(f"➕ Added protein helper: {protein_helper['name']}")
+        protein_helper = select_smart_protein_helper(meal_type, current_protein_sources, protein_deficit)
+        if protein_helper:
+            helpers.append(protein_helper)
+            print(f"➕ Added smart protein helper: {protein_helper['name']} (conflict-free)")
     
-    # Add carb helper if needed
+    # Add carb helper if needed (meal-appropriate)
     if carbs_deficit > 10:
-        carb_helper = meal_helpers.get('carbs', {
-            'name': 'Oats',
-            'protein_per_100g': 6.9,
-            'carbs_per_100g': 58,
-            'fat_per_100g': 6.9,
-            'calories_per_100g': 389,
-            'max_quantity': 200,
-            'category': 'carb_supplement'
-        })
-        helpers.append(carb_helper)
-        print(f"➕ Added carb helper: {carb_helper['name']}")
+        carb_helper = select_smart_carb_helper(meal_type, carbs_deficit)
+        if carb_helper:
+            helpers.append(carb_helper)
+            print(f"➕ Added smart carb helper: {carb_helper['name']} (meal-appropriate)")
     
-    # Add fat helper if needed
+    # Add fat helper if needed (meal-appropriate)
     if fat_deficit > 3:
-        fat_helper = meal_helpers.get('fat', {
-            'name': 'Olive Oil',
-            'protein_per_100g': 0,
-            'carbs_per_100g': 0,
-            'fat_per_100g': 100,
-            'calories_per_100g': 884,
-            'max_quantity': 30,
-            'category': 'fat_supplement'
-        })
-        helpers.append(fat_helper)
-        print(f"➕ Added fat helper: {fat_helper['name']}")
+        fat_helper = select_smart_fat_helper(meal_type, fat_deficit)
+        if fat_helper:
+            helpers.append(fat_helper)
+            print(f"➕ Added smart fat helper: {fat_helper['name']} (meal-appropriate)")
     
-    # Add calorie helper if needed
+    # Add calorie helper if needed (meal-appropriate)
     if calories_deficit > 50:
-        calorie_helper = meal_helpers.get('calories', {
-            'name': 'Honey',
-            'protein_per_100g': 0,
-            'carbs_per_100g': 80,
-            'fat_per_100g': 0,
-            'calories_per_100g': 307,
-            'max_quantity': 50,
-            'category': 'calorie_supplement'
-        })
-        helpers.append(calorie_helper)
-        print(f"➕ Added calorie helper: {calorie_helper['name']}")
+        calorie_helper = select_smart_calorie_helper(meal_type, calories_deficit)
+        if calorie_helper:
+            helpers.append(calorie_helper)
+            print(f"➕ Added smart calorie helper: {calorie_helper['name']} (meal-appropriate)")
     
     return helpers
 
-def get_meal_specific_helpers(meal_type):
-    """Get meal-specific helper ingredients"""
-    helpers = {
-        'breakfast': {
-            'protein': {'name': 'Greek Yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 3.6, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 200, 'category': 'protein_supplement'},
-            'carbs': {'name': 'Banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 23, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 150, 'category': 'carb_supplement'},
-            'fat': {'name': 'Almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50, 'category': 'fat_supplement'},
-            'calories': {'name': 'Honey', 'protein_per_100g': 0, 'carbs_per_100g': 80, 'fat_per_100g': 0, 'calories_per_100g': 307, 'max_quantity': 30, 'category': 'calorie_supplement'}
+def analyze_protein_sources(ingredients):
+    """Analyze current protein sources to prevent conflicts"""
+    protein_sources = {
+        'red_meat': [],      # beef, lamb, pork
+        'white_meat': [],    # chicken, turkey
+        'fish': [],          # salmon, tuna, cod
+        'plant_based': [],   # tofu, tempeh, legumes
+        'dairy_eggs': []     # eggs, yogurt, cheese
+    }
+    
+    for ing in ingredients:
+        name = ing['name'].lower()
+        protein = ing['protein_per_100g']
+        
+        if protein > 15:  # Only consider high-protein ingredients
+            if any(word in name for word in ['beef', 'lamb', 'pork', 'steak', 'burger']):
+                protein_sources['red_meat'].append(ing)
+            elif any(word in name for word in ['chicken', 'turkey', 'duck']):
+                protein_sources['white_meat'].append(ing)
+            elif any(word in name for word in ['salmon', 'tuna', 'cod', 'fish', 'seafood']):
+                protein_sources['fish'].append(ing)
+            elif any(word in name for word in ['tofu', 'tempeh', 'bean', 'lentil', 'chickpea']):
+                protein_sources['plant_based'].append(ing)
+            elif any(word in name for word in ['egg', 'yogurt', 'cheese', 'milk']):
+                protein_sources['dairy_eggs'].append(ing)
+    
+    return protein_sources
+
+def select_smart_protein_helper(meal_type, current_protein_sources, deficit):
+    """Select protein helper that doesn't conflict with current sources"""
+    
+    # Define protein source priorities for each meal type
+    meal_protein_priorities = {
+        'breakfast': ['dairy_eggs', 'plant_based', 'fish', 'white_meat', 'red_meat'],
+        'morning_snack': ['dairy_eggs', 'plant_based', 'fish'],
+        'lunch': ['red_meat', 'white_meat', 'fish', 'plant_based', 'dairy_eggs'],
+        'afternoon_snack': ['dairy_eggs', 'plant_based', 'fish'],
+        'dinner': ['fish', 'white_meat', 'plant_based', 'red_meat', 'dairy_eggs'],
+        'evening_snack': ['dairy_eggs', 'plant_based']
+    }
+    
+    priorities = meal_protein_priorities.get(meal_type.lower(), meal_protein_priorities['lunch'])
+    
+    # Find the best non-conflicting protein source
+    for source_type in priorities:
+        if not current_protein_sources[source_type]:  # No conflict
+            helper = get_protein_helper_by_type(source_type, deficit, meal_type)
+            if helper:
+                return helper
+    
+    # If all conflict, find the least conflicting option
+    for source_type in priorities:
+        helper = get_protein_helper_by_type(source_type, deficit, meal_type)
+        if helper:
+            print(f"⚠️  Using {helper['name']} despite potential conflict")
+            return helper
+    
+    return None
+
+def get_protein_helper_by_type(source_type, deficit, meal_type):
+    """Get protein helper based on source type and meal"""
+    
+    protein_helpers = {
+        'red_meat': {
+            'breakfast': {'name': 'Lean Beef Jerky', 'protein_per_100g': 35, 'carbs_per_100g': 5, 'fat_per_100g': 2, 'calories_per_100g': 180, 'max_quantity': 50, 'category': 'protein_supplement'},
+            'lunch': {'name': 'Lean Ground Beef', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 15, 'calories_per_100g': 250, 'max_quantity': 150, 'category': 'protein_supplement'},
+            'dinner': {'name': 'Beef Steak', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 220, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'default': {'name': 'Lean Beef', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 15, 'calories_per_100g': 250, 'max_quantity': 150, 'category': 'protein_supplement'}
         },
-        'lunch': {
-            'protein': {'name': 'Chicken Breast', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165, 'max_quantity': 200, 'category': 'protein_supplement'},
-            'carbs': {'name': 'Brown Rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 200, 'category': 'carb_supplement'},
-            'fat': {'name': 'Avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 100, 'category': 'fat_supplement'},
-            'calories': {'name': 'Sweet Potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 200, 'category': 'calorie_supplement'}
+        'white_meat': {
+            'breakfast': {'name': 'Turkey Slices', 'protein_per_100g': 29, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 189, 'max_quantity': 100, 'category': 'protein_supplement'},
+            'lunch': {'name': 'Chicken Breast', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'dinner': {'name': 'Grilled Chicken', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'default': {'name': 'Chicken Breast', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165, 'max_quantity': 200, 'category': 'protein_supplement'}
         },
-        'dinner': {
-            'protein': {'name': 'Salmon', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 208, 'max_quantity': 200, 'category': 'protein_supplement'},
-            'carbs': {'name': 'Quinoa', 'protein_per_100g': 4.4, 'carbs_per_100g': 22, 'fat_per_100g': 1.9, 'calories_per_100g': 120, 'max_quantity': 200, 'category': 'carb_supplement'},
-            'fat': {'name': 'Olive Oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 884, 'max_quantity': 30, 'category': 'fat_supplement'},
-            'calories': {'name': 'Nuts Mix', 'protein_per_100g': 15, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 500, 'max_quantity': 50, 'category': 'calorie_supplement'}
+        'fish': {
+            'breakfast': {'name': 'Smoked Salmon', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 208, 'max_quantity': 80, 'category': 'protein_supplement'},
+            'lunch': {'name': 'Grilled Salmon', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 208, 'max_quantity': 150, 'category': 'protein_supplement'},
+            'dinner': {'name': 'Baked Cod', 'protein_per_100g': 23, 'carbs_per_100g': 0, 'fat_per_100g': 0.9, 'calories_per_100g': 105, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'default': {'name': 'Salmon', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 208, 'max_quantity': 150, 'category': 'protein_supplement'}
+        },
+        'plant_based': {
+            'breakfast': {'name': 'Greek Yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 3.6, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'lunch': {'name': 'Tofu', 'protein_per_100g': 8, 'carbs_per_100g': 1.9, 'fat_per_100g': 4.8, 'calories_per_100g': 76, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'dinner': {'name': 'Tempeh', 'protein_per_100g': 20, 'carbs_per_100g': 7.6, 'fat_per_100g': 11, 'calories_per_100g': 192, 'max_quantity': 150, 'category': 'protein_supplement'},
+            'default': {'name': 'Tofu', 'protein_per_100g': 8, 'carbs_per_100g': 1.9, 'fat_per_100g': 4.8, 'calories_per_100g': 76, 'max_quantity': 200, 'category': 'protein_supplement'}
+        },
+        'dairy_eggs': {
+            'breakfast': {'name': 'Eggs', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 150, 'category': 'protein_supplement'},
+            'lunch': {'name': 'Cottage Cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'dinner': {'name': 'Greek Yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 3.6, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 200, 'category': 'protein_supplement'},
+            'default': {'name': 'Eggs', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 150, 'category': 'protein_supplement'}
         }
     }
     
-    return helpers.get(meal_type.lower(), helpers['lunch'])  # Default to lunch helpers
+    source_helpers = protein_helpers.get(source_type, {})
+    return source_helpers.get(meal_type.lower(), source_helpers.get('default'))
+
+def select_smart_carb_helper(meal_type, deficit):
+    """Select carb helper appropriate for meal type"""
+    
+    carb_helpers = {
+        'breakfast': {'name': 'Oatmeal', 'protein_per_100g': 6.9, 'carbs_per_100g': 58, 'fat_per_100g': 6.9, 'calories_per_100g': 389, 'max_quantity': 150, 'category': 'carb_supplement'},
+        'morning_snack': {'name': 'Banana', 'protein_per_100g': 1.1, 'carbs_per_100g': 23, 'fat_per_100g': 0.3, 'calories_per_100g': 89, 'max_quantity': 120, 'category': 'carb_supplement'},
+        'lunch': {'name': 'Brown Rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 200, 'category': 'carb_supplement'},
+        'afternoon_snack': {'name': 'Apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150, 'category': 'carb_supplement'},
+        'dinner': {'name': 'Quinoa', 'protein_per_100g': 4.4, 'carbs_per_100g': 22, 'fat_per_100g': 1.9, 'calories_per_100g': 120, 'max_quantity': 200, 'category': 'carb_supplement'},
+        'evening_snack': {'name': 'Berries', 'protein_per_100g': 0.7, 'carbs_per_100g': 12, 'fat_per_100g': 0.3, 'calories_per_100g': 50, 'max_quantity': 100, 'category': 'carb_supplement'}
+    }
+    
+    return carb_helpers.get(meal_type.lower(), carb_helpers['lunch'])
+
+def select_smart_fat_helper(meal_type, deficit):
+    """Select fat helper appropriate for meal type"""
+    
+    fat_helpers = {
+        'breakfast': {'name': 'Almonds', 'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579, 'max_quantity': 50, 'category': 'fat_supplement'},
+        'morning_snack': {'name': 'Walnuts', 'protein_per_100g': 15, 'carbs_per_100g': 14, 'fat_per_100g': 65, 'calories_per_100g': 654, 'max_quantity': 40, 'category': 'fat_supplement'},
+        'lunch': {'name': 'Avocado', 'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160, 'max_quantity': 100, 'category': 'fat_supplement'},
+        'afternoon_snack': {'name': 'Cashews', 'protein_per_100g': 18, 'carbs_per_100g': 30, 'fat_per_100g': 44, 'calories_per_100g': 553, 'max_quantity': 40, 'category': 'fat_supplement'},
+        'dinner': {'name': 'Olive Oil', 'protein_per_100g': 0, 'carbs_per_100g': 0, 'fat_per_100g': 100, 'calories_per_100g': 884, 'max_quantity': 30, 'category': 'fat_supplement'},
+        'evening_snack': {'name': 'Dark Chocolate', 'protein_per_100g': 4, 'carbs_per_100g': 60, 'fat_per_100g': 30, 'calories_per_100g': 546, 'max_quantity': 30, 'category': 'fat_supplement'}
+    }
+    
+    return fat_helpers.get(meal_type.lower(), fat_helpers['lunch'])
+
+def select_smart_calorie_helper(meal_type, deficit):
+    """Select calorie helper appropriate for meal type"""
+    
+    calorie_helpers = {
+        'breakfast': {'name': 'Honey', 'protein_per_100g': 0, 'carbs_per_100g': 80, 'fat_per_100g': 0, 'calories_per_100g': 307, 'max_quantity': 30, 'category': 'calorie_supplement'},
+        'morning_snack': {'name': 'Dried Fruits', 'protein_per_100g': 2, 'carbs_per_100g': 70, 'fat_per_100g': 0.5, 'calories_per_100g': 290, 'max_quantity': 50, 'category': 'calorie_supplement'},
+        'lunch': {'name': 'Sweet Potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 200, 'category': 'calorie_supplement'},
+        'afternoon_snack': {'name': 'Granola', 'protein_per_100g': 10, 'carbs_per_100g': 65, 'fat_per_100g': 20, 'calories_per_100g': 471, 'max_quantity': 60, 'category': 'calorie_supplement'},
+        'dinner': {'name': 'Nuts Mix', 'protein_per_100g': 15, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 500, 'max_quantity': 50, 'category': 'calorie_supplement'},
+        'evening_snack': {'name': 'Yogurt with Honey', 'protein_per_100g': 8, 'carbs_per_100g': 25, 'fat_per_100g': 2, 'calories_per_100g': 150, 'max_quantity': 100, 'category': 'calorie_supplement'}
+    }
+    
+    return calorie_helpers.get(meal_type.lower(), calorie_helpers['lunch'])
+
+def get_meal_specific_helpers_smart(meal_type, current_protein_sources):
+    """Get meal-specific helpers with conflict prevention (legacy function for compatibility)"""
+    # This function is now replaced by the smart selection functions above
+    return {}
+
+# This function has been replaced by smart selection functions above
 
 @app.route('/test-scipy-optimization', methods=['POST'])
 def test_scipy_optimization():

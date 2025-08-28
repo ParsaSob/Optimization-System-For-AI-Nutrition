@@ -3658,8 +3658,8 @@ class RAGMealOptimizer:
                     break
         
         # Log the source of candidates
-        if candidates == self.helper_ingredients[meal_type][macro]:
-            logger.info(f"🔍 Looking for {macro} helpers in {meal_type}, found {len(candidates)} candidates")
+        if candidates == self.helper_ingredients[normalized_meal_type][macro]:
+            logger.info(f"🔍 Looking for {macro} helpers in {normalized_meal_type}, found {len(candidates)} candidates")
         else:
             # Find which fallback meal type we're using
             fallback_meal = None
@@ -3669,9 +3669,9 @@ class RAGMealOptimizer:
                         fallback_meal = meal
                         break
             if fallback_meal:
-                logger.info(f"🔍 Looking for {macro} helpers in {meal_type} (using {fallback_meal} ingredients), found {len(candidates)} candidates")
+                logger.info(f"🔍 Looking for {macro} helpers in {normalized_meal_type} (using {fallback_meal} ingredients), found {len(candidates)} candidates")
             else:
-                logger.info(f"🔍 Looking for {macro} helpers in {meal_type}, found {len(candidates)} candidates")
+                logger.info(f"🔍 Looking for {macro} helpers in {normalized_meal_type}, found {len(candidates)} candidates")
         
         for cand in candidates:
             nm = cand['name'].strip().lower()

@@ -410,6 +410,16 @@ class RAGMealOptimizer:
            - [{'name': 'chicken', 'quantity': 100}, ...]
            - "گوشت، پیاز، گوجه" (string format - extract ingredient names)
         """
+        # List of meat ingredients to exclude from processing
+        excluded_meats = {
+            'beef', 'beef_steak', 'beef_jerky', 'ground_beef', 'lean_beef', 'lean_ground_beef',
+            'chicken', 'chicken_breast', 'chicken_thigh', 'grilled_chicken',
+            'turkey', 'turkey_bacon', 'turkey_jerky', 'turkey_slices',
+            'shrimp', 'shrimp_snack',
+            'tuna', 'tuna_snack',
+            'salmon', 'smoked_salmon', 'grilled_salmon'
+        }
+        
         ingredients = []
         seen = set()
 
@@ -458,6 +468,10 @@ class RAGMealOptimizer:
                 keyword_lower = keyword.lower()
                 if keyword_lower in text_lower:
                     ingredient_name = food_mapping.get(keyword, keyword)
+                    # Skip if this ingredient is in the excluded meats list
+                    if ingredient_name.lower() in excluded_meats:
+                        logger.info(f"🚫 Skipping excluded meat ingredient: '{keyword}' -> '{ingredient_name}'")
+                        continue
                     logger.info(f"✅ Found ingredient: '{keyword}' -> '{ingredient_name}'")
                     if ingredient_name not in string_seen:
                         candidates.append({'name': ingredient_name, 'quantity': 100})
@@ -477,6 +491,12 @@ class RAGMealOptimizer:
             key = name.lower()
             if key in seen:
                 continue
+                
+            # Skip if this ingredient is in the excluded meats list
+            if key in excluded_meats:
+                logger.info(f"🚫 Skipping excluded meat ingredient: '{name}'")
+                continue
+                
             enriched = self._enrich_ingredient_with_nutrition(ing)
             # default max_quantity
             if 'max_quantity' not in enriched:
@@ -1287,7 +1307,22 @@ class RAGMealOptimizer:
     def _update_helper_ingredients(self):
         """
         Update helper ingredients with comprehensive database and add broccoli to nutrition_db.
+        Filter out excluded meat ingredients.
         """
+        # List of meat ingredients to exclude from helper ingredients
+        excluded_meats = {
+            'beef', 'beef_steak', 'beef_jerky', 'ground_beef', 'lean_beef', 'lean_ground_beef',
+            'chicken', 'chicken_breast', 'chicken_thigh', 'grilled_chicken',
+            'turkey', 'turkey_bacon', 'turkey_jerky', 'turkey_slices',
+            'shrimp', 'shrimp_snack',
+            'tuna', 'tuna_snack',
+            'salmon', 'smoked_salmon', 'grilled_salmon'
+        }
+        
+        def filter_excluded_meats(ingredient_list):
+            """Filter out excluded meat ingredients from a list of ingredients."""
+            return [ing for ing in ingredient_list if ing['name'].lower() not in excluded_meats]
+        
         self.nutrition_db['broccoli'] = {
             'protein_per_100g': 2.8,
             'carbs_per_100g': 7,
@@ -1296,7 +1331,7 @@ class RAGMealOptimizer:
         }
         
         # Update lunch section with comprehensive ingredients
-        self.helper_ingredients['lunch']['protein'] = [
+        self.helper_ingredients['lunch']['protein'] = filter_excluded_meats([
             {'name': 'chicken_breast', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165, 'max_quantity': 200},
             {'name': 'turkey', 'protein_per_100g': 29, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 135, 'max_quantity': 200},
             {'name': 'tuna', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 150},
@@ -1304,7 +1339,7 @@ class RAGMealOptimizer:
             {'name': 'tofu', 'protein_per_100g': 15, 'carbs_per_100g': 2, 'fat_per_100g': 8, 'calories_per_100g': 145, 'max_quantity': 150},
             {'name': 'shrimp', 'protein_per_100g': 24, 'carbs_per_100g': 0.2, 'fat_per_100g': 0.3, 'calories_per_100g': 99, 'max_quantity': 150},
             {'name': 'lean_pork', 'protein_per_100g': 27, 'carbs_per_100g': 0, 'fat_per_100g': 6, 'calories_per_100g': 165, 'max_quantity': 150}
-        ]
+        ])
         
         self.helper_ingredients['lunch']['carbs'] = [
             {'name': 'brown_rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 200},
@@ -1328,7 +1363,7 @@ class RAGMealOptimizer:
         
         # Add breakfast section
         self.helper_ingredients['breakfast'] = {
-            'protein': [
+            'protein': filter_excluded_meats([
                 {'name': 'eggs', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 150},
                 {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 200},
                 {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 150},
@@ -1339,7 +1374,7 @@ class RAGMealOptimizer:
                 {'name': 'canadian_bacon', 'protein_per_100g': 20, 'carbs_per_100g': 0, 'fat_per_100g': 3, 'calories_per_100g': 110, 'max_quantity': 100},
                 {'name': 'sardines', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 208, 'max_quantity': 80},
                 {'name': 'hemp_seeds', 'protein_per_100g': 31, 'carbs_per_100g': 9, 'fat_per_100g': 49, 'calories_per_100g': 553, 'max_quantity': 40}
-            ],
+            ]),
             'carbs': [
                 {'name': 'oats', 'protein_per_100g': 6.9, 'carbs_per_100g': 58, 'fat_per_100g': 6.9, 'calories_per_100g': 389, 'max_quantity': 150},
                 {'name': 'whole_grain_bread', 'protein_per_100g': 13, 'carbs_per_100g': 41, 'fat_per_100g': 4.2, 'calories_per_100g': 247, 'max_quantity': 100},
@@ -1366,7 +1401,7 @@ class RAGMealOptimizer:
         
         # Add dinner section
         self.helper_ingredients['dinner'] = {
-            'protein': [
+            'protein': filter_excluded_meats([
                 {'name': 'beef_steak', 'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 220, 'max_quantity': 200},
                 {'name': 'salmon', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 13, 'calories_per_100g': 206, 'max_quantity': 150},
                 {'name': 'chicken_thigh', 'protein_per_100g': 24, 'carbs_per_100g': 0, 'fat_per_100g': 9, 'calories_per_100g': 177, 'max_quantity': 200},
@@ -1374,7 +1409,7 @@ class RAGMealOptimizer:
                 {'name': 'white_fish', 'protein_per_100g': 23, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 105, 'max_quantity': 150},
                 {'name': 'tempeh', 'protein_per_100g': 20, 'carbs_per_100g': 8, 'fat_per_100g': 11, 'calories_per_100g': 195, 'max_quantity': 150},
                 {'name': 'lamb', 'protein_per_100g': 25, 'carbs_per_100g': 0, 'fat_per_100g': 14, 'calories_per_100g': 215, 'max_quantity': 150}
-            ],
+            ]),
             'carbs': [
                 {'name': 'sweet_potato', 'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86, 'max_quantity': 200},
                 {'name': 'brown_rice', 'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111, 'max_quantity': 200},
@@ -1395,7 +1430,7 @@ class RAGMealOptimizer:
         
         # Add snack sections
         self.helper_ingredients['morning_snack'] = {
-            'protein': [
+            'protein': filter_excluded_meats([
                 {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 150},
                 {'name': 'hard_boiled_egg', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 100},
                 {'name': 'protein_bar', 'protein_per_100g': 30, 'carbs_per_100g': 30, 'fat_per_100g': 10, 'calories_per_100g': 350, 'max_quantity': 80},
@@ -1403,7 +1438,7 @@ class RAGMealOptimizer:
                 {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 100},
                 {'name': 'turkey_jerky', 'protein_per_100g': 30, 'carbs_per_100g': 3, 'fat_per_100g': 1, 'calories_per_100g': 150, 'max_quantity': 50},
                 {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80}
-            ],
+            ]),
             'carbs': [
                 {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
                 {'name': 'berries', 'protein_per_100g': 1, 'carbs_per_100g': 14, 'fat_per_100g': 0.3, 'calories_per_100g': 57, 'max_quantity': 100},
@@ -1423,7 +1458,7 @@ class RAGMealOptimizer:
         }
         
         self.helper_ingredients['afternoon_snack'] = {
-            'protein': [
+            'protein': filter_excluded_meats([
                 {'name': 'protein_bar', 'protein_per_100g': 30, 'carbs_per_100g': 30, 'fat_per_100g': 10, 'calories_per_100g': 350, 'max_quantity': 80},
                 {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 150},
                 {'name': 'beef_jerky', 'protein_per_100g': 33, 'carbs_per_100g': 3, 'fat_per_100g': 7, 'calories_per_100g': 200, 'max_quantity': 50},
@@ -1431,7 +1466,7 @@ class RAGMealOptimizer:
                 {'name': 'hummus', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 10, 'calories_per_100g': 166, 'max_quantity': 100},
                 {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80},
                 {'name': 'edamame', 'protein_per_100g': 11, 'carbs_per_100g': 10, 'fat_per_100g': 5, 'calories_per_100g': 121, 'max_quantity': 100}
-            ],
+            ]),
             'carbs': [
                 {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
                 {'name': 'whole_grain_crackers', 'protein_per_100g': 7, 'carbs_per_100g': 70, 'fat_per_100g': 10, 'calories_per_100g': 400, 'max_quantity': 50},
@@ -1451,7 +1486,7 @@ class RAGMealOptimizer:
         }
         
         self.helper_ingredients['evening_snack'] = {
-            'protein': [
+            'protein': filter_excluded_meats([
                 {'name': 'cottage_cheese', 'protein_per_100g': 11, 'carbs_per_100g': 3.4, 'fat_per_100g': 4.3, 'calories_per_100g': 98, 'max_quantity': 100},
                 {'name': 'greek_yogurt', 'protein_per_100g': 10, 'carbs_per_100g': 4, 'fat_per_100g': 0.4, 'calories_per_100g': 59, 'max_quantity': 150},
                 {'name': 'protein_shake', 'protein_per_100g': 80, 'carbs_per_100g': 5, 'fat_per_100g': 3, 'calories_per_100g': 400, 'max_quantity': 50},
@@ -1459,7 +1494,7 @@ class RAGMealOptimizer:
                 {'name': 'hummus', 'protein_per_100g': 8, 'carbs_per_100g': 14, 'fat_per_100g': 10, 'calories_per_100g': 166, 'max_quantity': 100},
                 {'name': 'hard_boiled_egg', 'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155, 'max_quantity': 100},
                 {'name': 'tuna_snack', 'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 1, 'calories_per_100g': 116, 'max_quantity': 80}
-            ],
+            ]),
             'carbs': [
                 {'name': 'apple', 'protein_per_100g': 0.3, 'carbs_per_100g': 14, 'fat_per_100g': 0.2, 'calories_per_100g': 52, 'max_quantity': 150},
                 {'name': 'whole_grain_crackers', 'protein_per_100g': 7, 'carbs_per_100g': 70, 'fat_per_100g': 10, 'calories_per_100g': 400, 'max_quantity': 50},

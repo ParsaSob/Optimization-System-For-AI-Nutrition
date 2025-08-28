@@ -383,7 +383,8 @@ class RAGMealOptimizer:
         logger.info(f"🔧 Materializing {n} ingredients with quantities:")
         for i in range(n):
             ing = dict(ingredients[i])
-            original_qty = ing.get('quantity', 0)  # Original input quantity
+            # CRITICAL FIX: Get original quantity from quantity_needed (website format) or quantity (fallback)
+            original_qty = ing.get('quantity_needed', ing.get('quantity', 0))
             optimized_qty = max(0.0, float(quantities[i]))
             
             # Ensure input ingredients maintain reasonable quantities

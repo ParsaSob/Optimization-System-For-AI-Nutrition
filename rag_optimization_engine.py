@@ -1276,13 +1276,36 @@ class RAGMealOptimizer:
             balanced_ing['quantity_needed'] = current_quantities[i]
             balanced_ingredients.append(balanced_ing)
         
-        # 🎯 ULTRA-PRECISE STRATEGY SELECTION - Including ultra-precise methods
-        essential_strategies = [
-            self._balance_by_ultra_precise_iterative,  # 🎯🎯🎯 Ultra-precise iterative (most precise)
-            self._balance_by_aggressive_target_reach,  # 🚀🚀🚀 Ultra-aggressive (most aggressive)
-            self._balance_by_smart_scaling,            # 🎯 Smart scaling (aggressive)
-            self._balance_by_macro_redistribution      # 🔄 Macro redistribution (aggressive)
-        ]
+        # 🎯 SMART STRATEGY SELECTION - Choose based on whether we're over or under targets
+        current_totals = self._calculate_final_meal(ingredients, [ing.get('quantity_needed', 0) for ing in ingredients])
+        
+        # Check if we're over targets
+        over_targets = False
+        for macro in ['calories', 'protein', 'carbs', 'fat']:
+            current = current_totals.get(macro, 0)
+            target = target_macros.get(macro, 0)
+            if current > target * 1.1:  # More than 10% over target
+                over_targets = True
+                break
+        
+        if over_targets:
+            # 🎯 CONSERVATIVE STRATEGIES - When over targets, REDUCE quantities
+            logger.info("🎯🎯🎯 Meal is OVER targets - Using CONSERVATIVE reduction strategies")
+            essential_strategies = [
+                self._balance_by_conservative_reduction,    # 🎯🎯🎯 Conservative reduction (reduces overage)
+                self._balance_by_ultra_precise_iterative,  # 🎯🎯🎯 Ultra-precise iterative (fine-tune)
+                self._balance_by_smart_scaling,            # 🎯 Smart scaling (balanced)
+                self._balance_by_macro_redistribution      # 🔄 Macro redistribution (balanced)
+            ]
+        else:
+            # 🚀 AGGRESSIVE STRATEGIES - When under targets, INCREASE quantities
+            logger.info("🚀🚀🚀 Meal is UNDER targets - Using AGGRESSIVE increase strategies")
+            essential_strategies = [
+                self._balance_by_ultra_precise_iterative,  # 🎯🎯🎯 Ultra-precise iterative (most precise)
+                self._balance_by_aggressive_target_reach,  # 🚀🚀🚀 Ultra-aggressive (most aggressive)
+                self._balance_by_smart_scaling,            # 🎯 Smart scaling (aggressive)
+                self._balance_by_macro_redistribution      # 🔄 Macro redistribution (aggressive)
+            ]
         
         best_result = None
         best_score = float('inf')
@@ -1739,6 +1762,67 @@ class RAGMealOptimizer:
                         logger.info(f"🎯 Fine-tune {macro}: {ingredients[best_idx]['name']} -{reduction_amount:.1f}g")
         
         return {'quantities': new_quantities, 'method': 'ultra_precise_iterative'}
+
+    def _balance_by_conservative_reduction(self, ingredients: List[Dict], target_macros: Dict, gaps: Dict) -> Optional[Dict]:
+        """CONSERVATIVE method that REDUCES quantities to reach targets (for over-target meals)."""
+        logger.info("🎯🎯🎯 CONSERVATIVE REDUCTION method activated!")
+        
+        # Calculate current totals
+        current_totals = self._calculate_final_meal(ingredients, [ing.get('quantity_needed', 0) for ing in ingredients])
+        
+        # Calculate how much we need to reduce each macro
+        reduction_needed = {}
+        for macro in ['calories', 'protein', 'carbs', 'fat']:
+            current = current_totals.get(macro, 0)
+            target = target_macros.get(macro, 0)
+            if current > target:
+                reduction_needed[macro] = current - target
+            else:
+                reduction_needed[macro] = 0
+        
+        logger.info(f"🎯 Reduction needed: {reduction_needed}")
+        
+        # Find the biggest overage
+        biggest_overage = max(reduction_needed.items(), key=lambda x: x[1])
+        logger.info(f"🎯 Biggest overage: {biggest_overage[0]} by {biggest_overage[1]:.1f}")
+        
+        # Calculate reduction factor for each ingredient based on their contribution to overage
+        new_quantities = []
+        
+        for ing in ingredients:
+            current_qty = ing.get('quantity_needed', 0)
+            
+            # Calculate how much this ingredient contributes to the biggest overage
+            macro_name = biggest_overage[0]
+            if macro_name == 'calories':
+                macro_per_100g = ing.get('calories_per_100g', 0)
+            else:
+                macro_per_100g = ing.get(f'{macro_name}_per_100g', 0)
+            
+            # Calculate current contribution
+            current_contribution = (macro_per_100g * current_qty) / 100
+            
+            if current_contribution > 0:
+                # Calculate how much we need to reduce this ingredient
+                target_contribution = current_contribution - (biggest_overage[1] * 0.3)  # Reduce by 30% of overage
+                if target_contribution < 0:
+                    target_contribution = current_contribution * 0.5  # At least reduce by half
+                
+                # Calculate new quantity
+                reduction_factor = target_contribution / current_contribution
+                new_qty = current_qty * reduction_factor
+                
+                # Ensure reasonable bounds
+                new_qty = max(new_qty, 20.0)  # Minimum 20g
+                new_qty = min(new_qty, current_qty)  # Don't increase
+                
+                new_quantities.append(new_qty)
+                logger.info(f"🎯 Reduced {ing['name']}: {current_qty:.1f}g → {new_qty:.1f}g (reduces {macro_name})")
+            else:
+                # This ingredient doesn't contribute to the overage, keep it
+                new_quantities.append(current_qty)
+        
+        return {'quantities': new_quantities, 'method': 'conservative_reduction'}
 
     def _balance_by_ingredient_prioritization(self, ingredients: List[Dict], target_macros: Dict, gaps: Dict) -> Optional[Dict]:
         """Balance by prioritizing ingredients that best help achieve targets."""

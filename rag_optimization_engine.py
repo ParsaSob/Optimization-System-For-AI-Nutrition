@@ -405,6 +405,8 @@ class RAGMealOptimizer:
            - [{'name': 'chicken', 'quantity': 100}, ...]
            - "گوشت، پیاز، گوجه" (string format - extract ingredient names)
         """
+        logger.info(f"🔍 Input rag_response type: {type(rag_response)}")
+        logger.info(f"🔍 Input rag_response: {rag_response}")
         # List of meat ingredients to exclude from helper ingredients only (not from input ingredients)
         excluded_from_helpers = {
             'beef', 'beef_steak', 'beef_jerky', 'ground_beef', 'lean_beef', 'lean_ground_beef',
@@ -421,7 +423,9 @@ class RAGMealOptimizer:
         candidates = []
         if isinstance(rag_response, list):
             candidates = rag_response
+            logger.info(f"📋 Processing as list with {len(candidates)} items")
         elif isinstance(rag_response, dict):
+            logger.info(f"📋 Processing as dict with keys: {list(rag_response.keys())}")
             # Handle website format: {rag_response: {suggestions: [{ingredients: [...]}]}}
             if 'rag_response' in rag_response and isinstance(rag_response['rag_response'], dict):
                 rag_data = rag_response['rag_response']
@@ -433,13 +437,23 @@ class RAGMealOptimizer:
                     candidates = rag_data['ingredients']
             # Handle direct format: {suggestions: [{ingredients: [...]}]}
             elif 'suggestions' in rag_response and isinstance(rag_response['suggestions'], list):
+                logger.info(f"📋 Found suggestions with {len(rag_response['suggestions'])} items")
                 for s in rag_response['suggestions']:
                     if isinstance(s, dict) and 'ingredients' in s:
                         candidates.extend(s['ingredients'])
+                        logger.info(f"📋 Added {len(s['ingredients'])} ingredients from suggestions")
             # Handle simple format: {ingredients: [...]}
             elif 'ingredients' in rag_response and isinstance(rag_response['ingredients'], list):
                 candidates = rag_response['ingredients']
-        elif isinstance(rag_response, str):
+                logger.info(f"📋 Added {len(rag_response['ingredients'])} ingredients directly")
+        else:
+            logger.warning(f"⚠️ Unexpected rag_response type: {type(rag_response)}")
+        
+        logger.info(f"📋 Total candidates found: {len(candidates)}")
+        for i, candidate in enumerate(candidates):
+            logger.info(f"📋 Candidate {i+1}: {candidate}")
+        
+        if isinstance(rag_response, str):
             # Parse string format for ingredient names
             # Example: "یک وعده غذایی سالم برای ناهار با گوشت، پیاز، گوجه و نان پیتا"
             # Extract common food terms
@@ -512,13 +526,20 @@ class RAGMealOptimizer:
                 'protein_per_100g' in enriched and 
                 'carbs_per_100g' in enriched and 
                 'fat_per_100g' in enriched and 
-                'calories_per_100g' in enriched and
-                any(enriched.get(f'{macro}_per_100g', 0) != 0 for macro in ['protein', 'carbs', 'fat', 'calories'])
+                'calories_per_100g' in enriched
             )
             
             if has_nutrition:
                 # Input ingredient has nutritional info - preserve it
                 logger.info(f"✅ Input ingredient '{name}' has nutritional info - preserving original values")
+                # Ensure all nutritional values are numbers
+                for macro in ['protein', 'carbs', 'fat', 'calories']:
+                    key = f'{macro}_per_100g'
+                    if key in enriched:
+                        try:
+                            enriched[key] = float(enriched[key])
+                        except (ValueError, TypeError):
+                            enriched[key] = 0.0
             else:
                 # Input ingredient doesn't have nutritional info - skip it (nutrition_db removed)
                 logger.warning(f"⚠️ Input ingredient '{name}' missing nutritional info - skipping (nutrition_db removed)")

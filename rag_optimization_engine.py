@@ -409,7 +409,7 @@ class RAGMealOptimizer:
 
     def _extract_rag_ingredients(self, rag_response: Union[Dict, List, str]) -> List[Dict]:
         """Support multiple shapes:
-           - {'suggestions': [{'ingredients': [...]}]}
+           - {'suggestions': [{'ingredients': [...]}]}  # Website format
            - {'ingredients': [...]}
            - [{'name': 'chicken', 'quantity': 100}, ...]
            - "گوشت، پیاز، گوجه" (string format - extract ingredient names)
@@ -431,11 +431,23 @@ class RAGMealOptimizer:
         if isinstance(rag_response, list):
             candidates = rag_response
         elif isinstance(rag_response, dict):
-            if 'ingredients' in rag_response and isinstance(rag_response['ingredients'], list):
-                candidates = rag_response['ingredients']
+            # Handle website format: {rag_response: {suggestions: [{ingredients: [...]}]}}
+            if 'rag_response' in rag_response and isinstance(rag_response['rag_response'], dict):
+                rag_data = rag_response['rag_response']
+                if 'suggestions' in rag_data and isinstance(rag_data['suggestions'], list):
+                    for s in rag_data['suggestions']:
+                        if isinstance(s, dict) and 'ingredients' in s:
+                            candidates.extend(s['ingredients'])
+                elif 'ingredients' in rag_data and isinstance(rag_data['ingredients'], list):
+                    candidates = rag_data['ingredients']
+            # Handle direct format: {suggestions: [{ingredients: [...]}]}
             elif 'suggestions' in rag_response and isinstance(rag_response['suggestions'], list):
                 for s in rag_response['suggestions']:
-                    candidates.extend(s.get('ingredients', []))
+                    if isinstance(s, dict) and 'ingredients' in s:
+                        candidates.extend(s['ingredients'])
+            # Handle simple format: {ingredients: [...]}
+            elif 'ingredients' in rag_response and isinstance(rag_response['ingredients'], list):
+                candidates = rag_response['ingredients']
         elif isinstance(rag_response, str):
             # Parse string format for ingredient names
             # Example: "یک وعده غذایی سالم برای ناهار با گوشت، پیاز، گوجه و نان پیتا"
@@ -496,11 +508,31 @@ class RAGMealOptimizer:
             # The exclusion list is only for helper ingredients, not for user input
             logger.info(f"✅ Processing input ingredient: '{name}'")
             
-            # CRITICAL FIX: Do NOT enrich input ingredients with nutrition_db
-            # Input ingredients already have their own nutritional information
-            # Just ensure they have the required fields and max_quantity
+            # CRITICAL FIX: Use nutrition_db only if input ingredients don't have nutritional info
+            # If they have nutritional info, preserve it. If not, enrich from nutrition_db
             enriched = ing.copy()  # Keep original data
             
+            # Handle quantity field (website sends quantity_needed, but we need quantity)
+            if 'quantity_needed' in enriched and 'quantity' not in enriched:
+                enriched['quantity'] = enriched['quantity_needed']
+            
+            # Check if ingredient has nutritional information
+            has_nutrition = (
+                'protein_per_100g' in enriched and 
+                'carbs_per_100g' in enriched and 
+                'fat_per_100g' in enriched and 
+                'calories_per_100g' in enriched and
+                any(enriched.get(f'{macro}_per_100g', 0) != 0 for macro in ['protein', 'carbs', 'fat', 'calories'])
+            )
+            
+            if has_nutrition:
+                # Input ingredient has nutritional info - preserve it
+                logger.info(f"✅ Input ingredient '{name}' has nutritional info - preserving original values")
+            else:
+                # Input ingredient doesn't have nutritional info - enrich from nutrition_db
+                logger.info(f"🔧 Input ingredient '{name}' missing nutritional info - enriching from nutrition_db")
+                enriched = self._enrich_ingredient_with_nutrition(ing)
+                
             # Ensure required fields exist (but don't override existing ones)
             if 'protein_per_100g' not in enriched:
                 enriched['protein_per_100g'] = 0.0
@@ -513,7 +545,7 @@ class RAGMealOptimizer:
                 
             # Set max_quantity based on input quantity or default
             if 'max_quantity' not in enriched:
-                enriched['max_quantity'] = max(200, int(ing.get('quantity', 200)) if isinstance(ing.get('quantity', 0), (int, float)) else 200)
+                enriched['max_quantity'] = max(200, int(enriched.get('quantity', 200)) if isinstance(enriched.get('quantity', 0), (int, float)) else 200)
             
             ingredients.append(enriched)
             seen.add(key)

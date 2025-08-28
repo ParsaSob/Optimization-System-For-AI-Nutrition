@@ -220,29 +220,7 @@ class RAGMealOptimizer:
             }
         }
 
-        # Basic nutritional data for enrichment
-        self.nutrition_db = {
-            'chicken': {'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165},
-            'chicken_breast': {'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165},
-            'beef': {'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 15, 'calories_per_100g': 250},
-            'beef_steak': {'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 220},
-            'ground_beef': {'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 15, 'calories_per_100g': 250},
-            'rice': {'protein_per_100g': 2.7, 'carbs_per_100g': 28, 'fat_per_100g': 0.3, 'calories_per_100g': 130},
-            'brown_rice': {'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111},
-            'basmati_rice': {'protein_per_100g': 2.7, 'carbs_per_100g': 28, 'fat_per_100g': 0.3, 'calories_per_100g': 130},
-            'bread': {'protein_per_100g': 13, 'carbs_per_100g': 41, 'fat_per_100g': 4.2, 'calories_per_100g': 247},
-            'tomato': {'protein_per_100g': 0.9, 'carbs_per_100g': 3.9, 'fat_per_100g': 0.2, 'calories_per_100g': 18},
-            'grilled_tomato': {'protein_per_100g': 0.9, 'carbs_per_100g': 3.9, 'fat_per_100g': 0.2, 'calories_per_100g': 18},
-            'onion': {'protein_per_100g': 1.1, 'carbs_per_100g': 9, 'fat_per_100g': 0.1, 'calories_per_100g': 40},
-            'potato': {'protein_per_100g': 2, 'carbs_per_100g': 17, 'fat_per_100g': 0.1, 'calories_per_100g': 77},
-            'eggs': {'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155},
-            'oats': {'protein_per_100g': 6.9, 'carbs_per_100g': 58, 'fat_per_100g': 6.9, 'calories_per_100g': 389},
-            'almonds': {'protein_per_100g': 21, 'carbs_per_100g': 22, 'fat_per_100g': 49, 'calories_per_100g': 579},
-            'avocado': {'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160},
-            'nuts_mix': {'protein_per_100g': 15, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 500},
-            'sweet_potato': {'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86},
-            'butter': {'protein_per_100g': 0.9, 'carbs_per_100g': 0.1, 'fat_per_100g': 81, 'calories_per_100g': 717},
-        }
+
 
         # Initialize DEAP if available
         if DEAP_AVAILABLE:
@@ -542,19 +520,9 @@ class RAGMealOptimizer:
                 # Input ingredient has nutritional info - preserve it
                 logger.info(f"✅ Input ingredient '{name}' has nutritional info - preserving original values")
             else:
-                # Input ingredient doesn't have nutritional info - enrich from nutrition_db
-                logger.info(f"🔧 Input ingredient '{name}' missing nutritional info - enriching from nutrition_db")
-                enriched = self._enrich_ingredient_with_nutrition(ing)
-                
-            # Ensure required fields exist (but don't override existing ones)
-            if 'protein_per_100g' not in enriched:
-                enriched['protein_per_100g'] = 0.0
-            if 'carbs_per_100g' not in enriched:
-                enriched['carbs_per_100g'] = 0.0
-            if 'fat_per_100g' not in enriched:
-                enriched['fat_per_100g'] = 0.0
-            if 'calories_per_100g' not in enriched:
-                enriched['calories_per_100g'] = 0.0
+                # Input ingredient doesn't have nutritional info - skip it (nutrition_db removed)
+                logger.warning(f"⚠️ Input ingredient '{name}' missing nutritional info - skipping (nutrition_db removed)")
+                continue
                 
             # Set max_quantity based on input quantity or default
             if 'max_quantity' not in enriched:
@@ -569,33 +537,7 @@ class RAGMealOptimizer:
         
         return ingredients
 
-    def _ensure_nutrition_fields(self, ingredient: Dict) -> Dict:
-        """Ensure nutrition fields exist for helper or custom items."""
-        out = ingredient.copy()
-        base = self.nutrition_db.get(out['name'].strip().lower())
-        if base:
-            out.update({k: base[k] for k in ['protein_per_100g', 'carbs_per_100g', 'fat_per_100g', 'calories_per_100g']})
-        else:
-            for k, dv in [('protein_per_100g', 5.0), ('carbs_per_100g', 10.0), ('fat_per_100g', 5.0), ('calories_per_100g', 100.0)]:
-                out[k] = float(out.get(k, dv))
-        if 'max_quantity' not in out:
-            out['max_quantity'] = 200
-        return out
 
-    def _enrich_ingredient_with_nutrition(self, ingredient: Dict) -> Dict:
-        name = ingredient.get('name', '').strip().lower()
-        out = ingredient.copy()
-        base = self.nutrition_db.get(name)
-        if base:
-            out.update(base)
-        else:
-            # fallback defaults
-            out.setdefault('protein_per_100g', 5.0)
-            out.setdefault('carbs_per_100g', 10.0)
-            out.setdefault('fat_per_100g', 5.0)
-            out.setdefault('calories_per_100g', 100.0)
-        out.setdefault('max_quantity', 200)
-        return out
 
     # --------------------- Optimization Core ---------------------
 
@@ -1386,12 +1328,7 @@ class RAGMealOptimizer:
             """Filter out excluded meat ingredients from a list of ingredients."""
             return [ing for ing in ingredient_list if ing['name'].lower() not in excluded_meats]
         
-        self.nutrition_db['broccoli'] = {
-            'protein_per_100g': 2.8,
-            'carbs_per_100g': 7,
-            'fat_per_100g': 0.4,
-            'calories_per_100g': 35
-        }
+
         
         # Update lunch section with comprehensive ingredients
         self.helper_ingredients['lunch']['protein'] = filter_excluded_meats([

@@ -1518,7 +1518,7 @@ class RAGMealOptimizer:
             current_qty = ing.get('quantity_needed', 0)
             if current_qty <= 0:
                 continue
-                
+            
             # Calculate how much this ingredient can help with each deficit
             total_help = 0
             for macro, gap in gaps_to_target.items():

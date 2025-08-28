@@ -495,11 +495,26 @@ class RAGMealOptimizer:
             # IMPORTANT: Do NOT exclude input ingredients - they should always be processed
             # The exclusion list is only for helper ingredients, not for user input
             logger.info(f"✅ Processing input ingredient: '{name}'")
+            
+            # CRITICAL FIX: Do NOT enrich input ingredients with nutrition_db
+            # Input ingredients already have their own nutritional information
+            # Just ensure they have the required fields and max_quantity
+            enriched = ing.copy()  # Keep original data
+            
+            # Ensure required fields exist (but don't override existing ones)
+            if 'protein_per_100g' not in enriched:
+                enriched['protein_per_100g'] = 0.0
+            if 'carbs_per_100g' not in enriched:
+                enriched['carbs_per_100g'] = 0.0
+            if 'fat_per_100g' not in enriched:
+                enriched['fat_per_100g'] = 0.0
+            if 'calories_per_100g' not in enriched:
+                enriched['calories_per_100g'] = 0.0
                 
-            enriched = self._enrich_ingredient_with_nutrition(ing)
-            # default max_quantity
+            # Set max_quantity based on input quantity or default
             if 'max_quantity' not in enriched:
                 enriched['max_quantity'] = max(200, int(ing.get('quantity', 200)) if isinstance(ing.get('quantity', 0), (int, float)) else 200)
+            
             ingredients.append(enriched)
             seen.add(key)
 

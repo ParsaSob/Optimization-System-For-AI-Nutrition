@@ -625,9 +625,12 @@ class RAGMealOptimizer:
                         except (ValueError, TypeError):
                             enriched[key] = 0.0
             else:
-                # Input ingredient doesn't have nutritional info - skip it (nutrition_db removed)
-                logger.warning(f"⚠️ Input ingredient '{name}' missing nutritional info - skipping (nutrition_db removed)")
-                continue
+                # Input ingredient doesn't have nutritional info - add default values
+                logger.info(f"ℹ️ Input ingredient '{name}' missing nutritional info - adding default values")
+                enriched['protein_per_100g'] = 0.0
+                enriched['carbs_per_100g'] = 0.0
+                enriched['fat_per_100g'] = 0.0
+                enriched['calories_per_100g'] = 0.0
                 
             # Set max_quantity based on input quantity or default
             if 'max_quantity' not in enriched:
@@ -3608,8 +3611,10 @@ class RAGMealOptimizer:
         # Define fallback priority based on meal type for better context
         fallback_priority = []
         if 'snack' in meal_type.lower():
-            # For snacks, only use other snack types as fallback (never use main meals)
+            # For snacks, NEVER use main meal ingredients - only use other snack types
             fallback_priority = ['morning_snack', 'afternoon_snack', 'evening_snack']
+            # Remove any main meal types from fallback
+            fallback_priority = [meal for meal in fallback_priority if meal != meal_type]
         elif meal_type == 'breakfast':
             # For breakfast, prefer lunch as fallback (similar meal size)
             fallback_priority = ['lunch', 'dinner']

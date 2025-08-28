@@ -226,10 +226,13 @@ class RAGMealOptimizer:
             'chicken_breast': {'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 3.6, 'calories_per_100g': 165},
             'beef': {'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 15, 'calories_per_100g': 250},
             'beef_steak': {'protein_per_100g': 31, 'carbs_per_100g': 0, 'fat_per_100g': 12, 'calories_per_100g': 220},
+            'ground_beef': {'protein_per_100g': 26, 'carbs_per_100g': 0, 'fat_per_100g': 15, 'calories_per_100g': 250},
             'rice': {'protein_per_100g': 2.7, 'carbs_per_100g': 28, 'fat_per_100g': 0.3, 'calories_per_100g': 130},
             'brown_rice': {'protein_per_100g': 2.7, 'carbs_per_100g': 23, 'fat_per_100g': 0.9, 'calories_per_100g': 111},
+            'basmati_rice': {'protein_per_100g': 2.7, 'carbs_per_100g': 28, 'fat_per_100g': 0.3, 'calories_per_100g': 130},
             'bread': {'protein_per_100g': 13, 'carbs_per_100g': 41, 'fat_per_100g': 4.2, 'calories_per_100g': 247},
             'tomato': {'protein_per_100g': 0.9, 'carbs_per_100g': 3.9, 'fat_per_100g': 0.2, 'calories_per_100g': 18},
+            'grilled_tomato': {'protein_per_100g': 0.9, 'carbs_per_100g': 3.9, 'fat_per_100g': 0.2, 'calories_per_100g': 18},
             'onion': {'protein_per_100g': 1.1, 'carbs_per_100g': 9, 'fat_per_100g': 0.1, 'calories_per_100g': 40},
             'potato': {'protein_per_100g': 2, 'carbs_per_100g': 17, 'fat_per_100g': 0.1, 'calories_per_100g': 77},
             'eggs': {'protein_per_100g': 13, 'carbs_per_100g': 1.1, 'fat_per_100g': 11, 'calories_per_100g': 155},
@@ -238,6 +241,7 @@ class RAGMealOptimizer:
             'avocado': {'protein_per_100g': 2, 'carbs_per_100g': 9, 'fat_per_100g': 15, 'calories_per_100g': 160},
             'nuts_mix': {'protein_per_100g': 15, 'carbs_per_100g': 20, 'fat_per_100g': 50, 'calories_per_100g': 500},
             'sweet_potato': {'protein_per_100g': 1.6, 'carbs_per_100g': 20, 'fat_per_100g': 0.1, 'calories_per_100g': 86},
+            'butter': {'protein_per_100g': 0.9, 'carbs_per_100g': 0.1, 'fat_per_100g': 81, 'calories_per_100g': 717},
         }
 
         # Initialize DEAP if available
@@ -410,8 +414,8 @@ class RAGMealOptimizer:
            - [{'name': 'chicken', 'quantity': 100}, ...]
            - "گوشت، پیاز، گوجه" (string format - extract ingredient names)
         """
-        # List of meat ingredients to exclude from processing
-        excluded_meats = {
+        # List of meat ingredients to exclude from helper ingredients only (not from input ingredients)
+        excluded_from_helpers = {
             'beef', 'beef_steak', 'beef_jerky', 'ground_beef', 'lean_beef', 'lean_ground_beef',
             'chicken', 'chicken_breast', 'chicken_thigh', 'grilled_chicken',
             'turkey', 'turkey_bacon', 'turkey_jerky', 'turkey_slices',
@@ -468,10 +472,6 @@ class RAGMealOptimizer:
                 keyword_lower = keyword.lower()
                 if keyword_lower in text_lower:
                     ingredient_name = food_mapping.get(keyword, keyword)
-                    # Skip if this ingredient is in the excluded meats list
-                    if ingredient_name.lower() in excluded_meats:
-                        logger.info(f"🚫 Skipping excluded meat ingredient: '{keyword}' -> '{ingredient_name}'")
-                        continue
                     logger.info(f"✅ Found ingredient: '{keyword}' -> '{ingredient_name}'")
                     if ingredient_name not in string_seen:
                         candidates.append({'name': ingredient_name, 'quantity': 100})
@@ -492,10 +492,9 @@ class RAGMealOptimizer:
             if key in seen:
                 continue
                 
-            # Skip if this ingredient is in the excluded meats list
-            if key in excluded_meats:
-                logger.info(f"🚫 Skipping excluded meat ingredient: '{name}'")
-                continue
+            # IMPORTANT: Do NOT exclude input ingredients - they should always be processed
+            # The exclusion list is only for helper ingredients, not for user input
+            logger.info(f"✅ Processing input ingredient: '{name}'")
                 
             enriched = self._enrich_ingredient_with_nutrition(ing)
             # default max_quantity
@@ -504,6 +503,10 @@ class RAGMealOptimizer:
             ingredients.append(enriched)
             seen.add(key)
 
+        logger.info(f"🍽️ Total ingredients extracted: {len(ingredients)}")
+        for ing in ingredients:
+            logger.info(f"   - {ing['name']}: protein={ing.get('protein_per_100g', 0)}, carbs={ing.get('carbs_per_100g', 0)}, fat={ing.get('fat_per_100g', 0)}, calories={ing.get('calories_per_100g', 0)}")
+        
         return ingredients
 
     def _ensure_nutrition_fields(self, ingredient: Dict) -> Dict:

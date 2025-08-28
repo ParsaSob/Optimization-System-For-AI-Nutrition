@@ -314,9 +314,20 @@ class RAGMealOptimizer:
             helper_ingredients = deficit_helpers + balancing_helpers
             logger.info(f"🔧 Total helper ingredients: {len(helper_ingredients)}")
 
-            # Merge (as candidates) – no preset quantities; let optimizer decide.
-            all_ingredients = self._merge_ingredients_for_reopt(rag_ingredients, helper_ingredients)
-            logger.info(f"🔁 Re-optimizing with {len(all_ingredients)} ingredients (including {len(helper_ingredients)} helpers)...")
+            # Clean up excess ingredients if we have too many
+            if len(helper_ingredients) > 3:
+                logger.info("🧹 Too many helper ingredients detected, cleaning up...")
+                all_ingredients = self._cleanup_excess_ingredients(
+                    self._merge_ingredients_for_reopt(rag_ingredients, helper_ingredients),
+                    target_macros,
+                    meal_type
+                )
+                logger.info(f"🧹 After cleanup: {len(all_ingredients)} ingredients")
+            else:
+                # Merge (as candidates) – no preset quantities; let optimizer decide.
+                all_ingredients = self._merge_ingredients_for_reopt(rag_ingredients, helper_ingredients)
+            
+            logger.info(f"🔁 Re-optimizing with {len(all_ingredients)} ingredients (including {len([h for h in all_ingredients if '_balancing_amount' in h])} helpers)...")
 
             # ---- STEP 3: Re-optimize on the full set ----
             final_result = self._run_optimization_methods(all_ingredients, target_macros)
@@ -4132,3 +4143,67 @@ class RAGMealOptimizer:
         }
         
     # REMOVED: _run_genetic_algorithm_final - Unrealistic method with extreme parameters
+
+    def _cleanup_excess_ingredients(self, ingredients: List[Dict], target_macros: Dict, meal_type: str) -> List[Dict]:
+        """
+        Clean up excessive helper ingredients and re-optimize the meal.
+        This method removes ingredients that are causing the meal to be too far from targets.
+        """
+        logger.info("🧹 Cleaning up excess ingredients and re-optimizing...")
+        
+        # Separate input ingredients from helper ingredients
+        input_ingredients = []
+        helper_ingredients = []
+        
+        for ing in ingredients:
+            if '_balancing_amount' in ing or ing.get('name') in [h['name'] for h in self.helper_ingredients.get('morning_snack', {}).get('protein', [])]:
+                helper_ingredients.append(ing)
+            else:
+                input_ingredients.append(ing)
+        
+        logger.info(f"📋 Input ingredients: {len(input_ingredients)}, Helper ingredients: {len(helper_ingredients)}")
+        
+        # If we have too many helper ingredients, remove some
+        if len(helper_ingredients) > 3:  # Keep max 3 helper ingredients
+            logger.info(f"🗑️ Too many helper ingredients ({len(helper_ingredients)}), removing excess...")
+            
+            # Sort helper ingredients by their contribution to target achievement
+            helper_scores = []
+            for helper in helper_ingredients:
+                score = 0
+                # Calculate how well this helper contributes to targets
+                for macro in ['protein', 'carbs', 'fat']:
+                    target = target_macros.get(macro, 0)
+                    current = helper.get(f'{macro}_per_100g', 0) * helper.get('quantity_needed', 0) / 100
+                    if target > 0:
+                        score += min(current / target, 1.0)  # Higher score for better target contribution
+                helper_scores.append((helper, score))
+            
+            # Sort by score (highest first) and keep top 3
+            helper_scores.sort(key=lambda x: x[1], reverse=True)
+            helper_ingredients = [h[0] for h in helper_scores[:3]]
+            logger.info(f"✅ Kept top 3 helper ingredients: {[h['name'] for h in helper_ingredients]}")
+        
+        # Combine input and cleaned helper ingredients
+        cleaned_ingredients = input_ingredients + helper_ingredients
+        
+        # Re-optimize with cleaned ingredients
+        logger.info("🔄 Re-optimizing with cleaned ingredients...")
+        
+        # Run optimization on cleaned ingredients
+        optimization_result = self._run_optimization_methods(cleaned_ingredients, target_macros)
+        
+        if optimization_result and optimization_result.get('success'):
+            # Apply the optimization
+            optimized_quantities = optimization_result.get('quantities', [])
+            
+            # Update ingredient quantities
+            for i, ing in enumerate(cleaned_ingredients):
+                if i < len(optimized_quantities):
+                    ing['quantity_needed'] = optimized_quantities[i]
+            
+            logger.info("✅ Cleanup and re-optimization completed successfully")
+            return cleaned_ingredients
+        else:
+            logger.warning("⚠️ Re-optimization failed, returning original ingredients")
+            return ingredients

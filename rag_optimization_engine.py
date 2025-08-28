@@ -1104,6 +1104,9 @@ class RAGMealOptimizer:
         existing = {ing['name'].strip().lower() for ing in current_ingredients}
         helpers = []
 
+        # Normalize meal_type for helper selection
+        normalized_meal_type = self._normalize_meal_type(meal_type)
+
         # Force add helpers for any macro with deficit > 1g
         # If focus_macros is specified, only focus on those macros
         target_macros_list = focus_macros if focus_macros else ['protein', 'carbs', 'fat']
@@ -1119,7 +1122,7 @@ class RAGMealOptimizer:
             max_helpers = 3  # Increased max helpers
             
             while deficits[macro] > 1.0 and count < max_helpers:
-                h = self._select_best_helper_candidate(meal_type, macro, existing)
+                h = self._select_best_helper_candidate(normalized_meal_type, macro, existing)
                 if not h:
                     logger.warning(f"⚠️ No helper candidate found for {macro}")
                     break
@@ -1184,6 +1187,9 @@ class RAGMealOptimizer:
         existing = {ing['name'].strip().lower() for ing in current_ingredients}
         balancing_helpers = []
 
+        # Normalize meal_type for helper selection
+        normalized_meal_type = self._normalize_meal_type(meal_type)
+
         # For each excess macro, add balancing ingredients
         for excess_macro in excess_macros:
             if excess_macro not in ['protein', 'carbs', 'fat']:
@@ -1210,7 +1216,7 @@ class RAGMealOptimizer:
             max_balancers = 2
             
             while current_excess > 1.0 and count < max_balancers:
-                balancer = self._select_best_helper_candidate(meal_type, balance_macro, existing)
+                balancer = self._select_best_helper_candidate(normalized_meal_type, balance_macro, existing)
                 if not balancer:
                     logger.warning(f"⚠️ No balancing candidate found for {balance_macro}")
                     break
@@ -3597,16 +3603,24 @@ class RAGMealOptimizer:
 
     def _select_best_helper_candidate(self, meal_type: str, macro: str, existing_names: set) -> Optional[Dict]:
         """Pick the most efficient helper for a macro for the given meal; aggressive but bounded scoring."""
-        if meal_type not in self.helper_ingredients:
-            meal_type = 'lunch'
-        if macro not in self.helper_ingredients[meal_type]:
+        
+        # Normalize meal_type to match helper_ingredients keys
+        normalized_meal_type = self._normalize_meal_type(meal_type)
+        
+        if normalized_meal_type not in self.helper_ingredients:
+            logger.warning(f"⚠️ Unknown meal type '{meal_type}', normalizing to '{normalized_meal_type}'")
+            if normalized_meal_type not in self.helper_ingredients:
+                logger.warning(f"⚠️ Still unknown after normalization, using 'lunch' as fallback")
+                normalized_meal_type = 'lunch'
+        
+        if macro not in self.helper_ingredients[normalized_meal_type]:
             return None
 
         best = None
         best_score = -1e9
         
         # First try to find candidates in the specific meal type
-        candidates = self.helper_ingredients[meal_type][macro]
+        candidates = self.helper_ingredients[normalized_meal_type][macro]
         
         # Define fallback priority based on meal type for better context
         fallback_priority = []
@@ -3693,8 +3707,34 @@ class RAGMealOptimizer:
                 best['max_quantity'] = min(maxq, 400.0)
             return best
         else:
-            logger.warning(f"❌ No suitable helper found for {macro} in {meal_type}")
+            logger.warning(f"❌ No suitable helper found for {macro} in {normalized_meal_type}")
             return None
+    
+    def _normalize_meal_type(self, meal_type: str) -> str:
+        """Normalize meal type string to match helper_ingredients keys."""
+        if not meal_type:
+            return 'lunch'
+        
+        # Convert to lowercase and replace spaces with underscores
+        normalized = meal_type.lower().replace(' ', '_')
+        
+        # Map common variations to standard keys
+        meal_mapping = {
+            'morning_snack': 'morning_snack',
+            'morning snack': 'morning_snack',
+            'morningsnack': 'morning_snack',
+            'afternoon_snack': 'afternoon_snack',
+            'afternoon snack': 'afternoon_snack',
+            'afternoonsnack': 'afternoon_snack',
+            'evening_snack': 'evening_snack',
+            'evening snack': 'evening_snack',
+            'eveningsnack': 'evening_snack',
+            'breakfast': 'breakfast',
+            'lunch': 'lunch',
+            'dinner': 'dinner'
+        }
+        
+        return meal_mapping.get(normalized, normalized)
 
 
 

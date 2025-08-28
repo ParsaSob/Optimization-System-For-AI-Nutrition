@@ -20,42 +20,49 @@ rag_meal_optimizer = RAGMealOptimizer()
 def health():
     """Health check endpoint"""
     return jsonify({
-        "status": "healthy",
+        "status": "healthy", 
         "message": "Server is running"
     })
 
 @app.route('/optimize-meal', methods=['POST'])
 def optimize_meal():
-    """Single meal optimization endpoint"""
+    """Advanced single meal optimization endpoint with automatic helper ingredients"""
     try:
         request_data = request.get_json()
         
         if not request_data:
             return jsonify({"error": "No request data provided"}), 400
         
-        # Extract data
-        rag_response = request_data.get('rag_response', {})
-        target_macros = request_data.get('target_macros', {})
-        user_preferences = request_data.get('user_preferences', {})
-        meal_type = request_data.get('meal_type', 'Lunch')
+        # Validate required fields
+        required_fields = ['rag_response', 'target_macros', 'user_preferences', 'meal_type']
+        for field in required_fields:
+            if field not in request_data:
+                return jsonify({"error": f"Missing required field: {field}"}), 400
         
-        print(f"🚀 Starting optimization for {meal_type} meal...")
+        # Extract data
+        rag_response = request_data['rag_response']
+        target_macros = request_data['target_macros']
+        user_preferences = request_data['user_preferences']
+        meal_type = request_data['meal_type']
+        
+        print(f"🚀 Starting advanced optimization for {meal_type} meal...")
         print(f"🎯 Target macros: {target_macros}")
         
-        # Run optimization
+        # Run advanced optimization with request_data for helper selection
         result = rag_meal_optimizer.optimize_single_meal(
             rag_response=rag_response,
             target_macros=target_macros,
             user_preferences=user_preferences,
-            meal_type=meal_type
+            meal_type=meal_type,
+            request_data=request_data  # Pass full request data for proper helper selection
         )
         
-        print(f"✅ Optimization completed!")
+        print(f"✅ Advanced optimization completed!")
         return jsonify(result)
         
     except Exception as e:
         return jsonify({
-            "error": f"Optimization failed: {str(e)}",
+            "error": f"Advanced meal optimization failed: {str(e)}",
             "status": "error"
         }), 500
 
@@ -64,7 +71,7 @@ if __name__ == '__main__':
     print("📡 Endpoints:")
     print("   - GET  /health")
     print("   - POST  /optimize-meal")
-    
+
     # Get port from environment variable (for Render) or use default
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV') == 'development'

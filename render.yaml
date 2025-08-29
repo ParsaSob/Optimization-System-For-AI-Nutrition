@@ -4,9 +4,13 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python backend_server.py
+    startCommand: python start.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: PORT
         value: 10000
+      - key: SERVER_TYPE
+        value: flask
+      - key: FLASK_ENV
+        value: production

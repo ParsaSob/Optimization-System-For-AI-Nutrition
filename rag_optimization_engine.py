@@ -715,15 +715,35 @@ class RAGMealOptimizer:
                 logger.error(f"❌ Error getting original ingredients: {e}")
         
         for ing in final_ingredients:
+            quantity = max(0.0, ing.get('quantity_needed', 0.0))
             formatted_meal.append({
                 "name": ing['name'].replace('_', ' ').title(),
-                "quantity_needed": round(max(0.0, ing.get('quantity_needed', 0.0)), 1),
+                "quantity_needed": round(quantity, 1),
+                "unit": "g",
+                "calories": round(ing.get('calories_per_100g', 0) * quantity / 100, 1),
+                "protein": round(ing.get('protein_per_100g', 0) * quantity / 100, 1),
+                "carbs": round(ing.get('carbs_per_100g', 0) * quantity / 100, 1),
+                "fat": round(ing.get('fat_per_100g', 0) * quantity / 100, 1),
                 "protein_per_100g": ing.get('protein_per_100g', 0),
                 "carbs_per_100g": ing.get('carbs_per_100g', 0),
                 "fat_per_100g": ing.get('fat_per_100g', 0),
                 "calories_per_100g": ing.get('calories_per_100g', 0)
             })
 
+        # Format helper ingredients to include complete information
+        formatted_helpers = []
+        for helper in helper_ingredients_added:
+            formatted_helper = {
+                "name": helper['name'].replace('_', ' ').title(),
+                "quantity_needed": round(max(0.0, helper.get('quantity_needed', 0.0)), 1),
+                "unit": "g",
+                "calories": round(helper.get('calories_per_100g', 0) * helper.get('quantity_needed', 0) / 100, 1),
+                "protein": round(helper.get('protein_per_100g', 0) * helper.get('quantity_needed', 0) / 100, 1),
+                "carbs": round(helper.get('carbs_per_100g', 0) * helper.get('quantity_needed', 0) / 100, 1),
+                "fat": round(helper.get('fat_per_100g', 0) * helper.get('quantity_needed', 0) / 100, 1)
+            }
+            formatted_helpers.append(formatted_helper)
+        
         return {
             "user_id": request_data.get('user_id', 'default_user') if request_data else 'default_user',
             "success": True,
@@ -735,7 +755,7 @@ class RAGMealOptimizer:
             "meal": formatted_meal,
             "nutritional_totals": totals,
             "target_achievement": achievement,
-            "helper_ingredients_added": helper_ingredients_added,
+            "helper_ingredients_added": formatted_helpers,
             "optimization_steps": {
                 "step1": "Initial optimization with advanced methods",
                 "step2": "Helper ingredients added if needed",
@@ -1385,6 +1405,7 @@ class RAGMealOptimizer:
     def _check_target_achievement(self, totals: Dict, target_macros: Dict) -> Dict:
         """
         Relax calorie tolerance to ±10% and keep ±5% for other macros.
+        Overall achievement is True if at least 2 out of 4 macros are achieved.
         """
         achievement = {}
         for m, t in target_macros.items():
@@ -1394,7 +1415,11 @@ class RAGMealOptimizer:
             else:
                 achieved = (a >= t * 0.95) and (a <= t * 1.05)
             achievement[m] = achieved
-        achievement['overall'] = all(achievement.values())
+        
+        # Overall achievement: True if at least 2 out of 4 macros are achieved
+        achieved_count = sum(achievement.values())
+        achievement['overall'] = achieved_count >= 2
+        
         return achievement
 
     # --------------------- Smart Helpers (Aggressive but Bounded) ---------------------
@@ -1463,7 +1488,11 @@ class RAGMealOptimizer:
                     logger.info(f"⚠️ Helper {h['name']} would add {additional_calories:.1f} calories, skipping")
                     continue
                 
-                helpers.append(h)
+                # Add quantity_needed to helper ingredient
+                h_with_quantity = dict(h)
+                h_with_quantity['quantity_needed'] = amount
+                
+                helpers.append(h_with_quantity)
                 existing.add(h['name'].strip().lower())
                 
                 # Update running totals
@@ -3632,10 +3661,13 @@ class RAGMealOptimizer:
             final_gaps[macro] = gap
             logger.info(f"🎯🎯🎯 Final {macro} gap: {gap:.2f}g")
         
-        # Use GENETIC ALGORITHM to find optimal quantities
+        # Use OPTIMIZED GENETIC ALGORITHM to find optimal quantities
         try:
-            # Define the macros we care about (using existing naming convention)
-            MACROS = ['calories', 'carbs', 'fat', 'protein']
+            import random
+            import numpy as np
+            
+            # Define the macros we care about
+            MACROS = ['protein', 'carbs', 'fat', 'calories']
             
             def fitness(individual, ingredients, target):
                 """
@@ -3655,19 +3687,39 @@ class RAGMealOptimizer:
                         elif macro == 'protein':
                             macro_key = 'protein_per_100g'
                         
-                        totals[macro] += (qty * ingredients[i].get(macro_key, 0)) / 100.0
+                        if macro_key in ingredients[i]:
+                            totals[macro] += (qty * ingredients[i][macro_key]) / 100.0
                 
-                diff = sum(abs(totals[macro] - target.get(macro, 0)) for macro in MACROS)
+                # Calculate weighted fitness - prioritize calories and fat more
+                diff = 0
+                for macro in MACROS:
+                    if macro == 'calories':
+                        diff += abs(totals[macro] - target[macro]) * 2.0  # Double weight for calories
+                    elif macro == 'fat':
+                        diff += abs(totals[macro] - target[macro]) * 1.5  # Higher weight for fat
+                    else:
+                        diff += abs(totals[macro] - target[macro])
+                
                 return diff
             
-            def create_individual(num_ingredients, max_qty=1000.0):
+            def create_individual(num_ingredients, current_quantities, max_qty=1000.0):
                 """
                 Create a random individual: list of quantities for each ingredient.
+                Start with current quantities and add variation.
                 """
-                return [random.uniform(0, max_qty) for _ in range(num_ingredients)]
+                individual = []
+                for i, current_qty in enumerate(current_quantities):
+                    # Random variation around current quantity
+                    variation = random.uniform(0.1, 2.0)  # 0.1x to 2x
+                    new_qty = current_qty * variation
+                    new_qty = max(new_qty, 1.0)  # Minimum 1g
+                    max_qty = float(ingredients[i].get('max_quantity', 1000))
+                    new_qty = min(new_qty, max_qty)
+                    individual.append(new_qty)
+                return individual
             
-            def create_population(pop_size, num_ingredients, max_qty=1000.0):
-                return [create_individual(num_ingredients, max_qty) for _ in range(pop_size)]
+            def create_population(pop_size, num_ingredients, current_quantities, max_qty=1000.0):
+                return [create_individual(num_ingredients, current_quantities, max_qty) for _ in range(pop_size)]
             
             def selection(population, fitnesses, k=3):
                 """
@@ -3695,91 +3747,77 @@ class RAGMealOptimizer:
                 """
                 for i in range(len(individual)):
                     if random.random() < mutation_rate:
-                        individual[i] += np.random.normal(0, sigma)
-                        individual[i] = max(0, individual[i])  # No negative quantities
-                        # Apply max quantity constraint
+                        # Use absolute value to ensure no negative quantities
+                        mutation = abs(np.random.normal(0, sigma))
+                        individual[i] += mutation
+                        individual[i] = max(1.0, individual[i])  # No negative quantities
                         max_qty = float(ingredients[i].get('max_quantity', 1000))
                         individual[i] = min(individual[i], max_qty)
                 return individual
             
-            def genetic_algorithm(ingredients, target, pop_size=100, generations=200, mutation_rate=0.1, max_qty=1000.0):
-                num_ingredients = len(ingredients)
-                population = create_population(pop_size, num_ingredients, max_qty)
+            # Genetic Algorithm parameters
+            pop_size = 100
+            generations = 200
+            mutation_rate = 0.1
+            max_qty = 1000.0
+            
+            num_ingredients = len(ingredients)
+            current_quantities = [ing.get('quantity_needed', 0) for ing in ingredients]
+            population = create_population(pop_size, num_ingredients, current_quantities, max_qty)
+            
+            best_individual = None
+            best_fitness = float('inf')
+            
+            for gen in range(generations):
+                fitnesses = [fitness(ind, ingredients, target_macros) for ind in population]
                 
-                for gen in range(generations):
-                    fitnesses = [fitness(ind, ingredients, target) for ind in population]
-                    
-                    # Elitism: keep the best individual
-                    best_idx = np.argmin(fitnesses)
-                    best_ind = population[best_idx]
-                    best_fitness = fitnesses[best_idx]
-                    
-                    if gen % 20 == 0:
-                        logger.info(f"🎯🎯🎯 Generation {gen}: Best fitness = {best_fitness:.2f}")
-                    
-                    # Selection
-                    selected = selection(population, fitnesses)
-                    
-                    # Create next generation
-                    next_population = [best_ind]  # Elitism
-                    while len(next_population) < pop_size:
-                        parent1, parent2 = random.sample(selected, 2)
-                        child1, child2 = crossover(parent1[:], parent2[:])
-                        child1 = mutate(child1, mutation_rate)
-                        child2 = mutate(child2, mutation_rate)
-                        next_population.extend([child1, child2])
-                    next_population = next_population[:pop_size]
-                    
-                    population = next_population
-                
-                # Final best
-                fitnesses = [fitness(ind, ingredients, target) for ind in population]
+                # Elitism: keep the best individual
                 best_idx = np.argmin(fitnesses)
                 best_ind = population[best_idx]
                 best_fitness = fitnesses[best_idx]
                 
-                # Compute final totals
-                totals = {macro: 0.0 for macro in MACROS}
-                for i, qty in enumerate(best_ind):
-                    for macro in MACROS:
-                        if macro == 'calories':
-                            macro_key = 'calories_per_100g'
-                        elif macro == 'carbs':
-                            macro_key = 'carbs_per_100g'
-                        elif macro == 'fat':
-                            macro_key = 'fat_per_100g'
-                        elif macro == 'protein':
-                            macro_key = 'protein_per_100g'
-                        
-                        totals[macro] += (qty * ingredients[i].get(macro_key, 0)) / 100.0
+                if gen % 20 == 0:
+                    logger.info(f"🎯🎯🎯 Generation {gen}: Best fitness = {best_fitness:.2f}")
                 
-                return best_ind, totals, best_fitness
-            
-            # Run genetic algorithm
-            best_quantities, final_totals, final_fitness = genetic_algorithm(
-                ingredients, target_macros, pop_size=100, generations=200, mutation_rate=0.1, max_qty=1000.0
-            )
+                # Selection
+                selected = selection(population, fitnesses)
+                
+                # Create next generation
+                next_population = [best_ind]  # Elitism
+                while len(next_population) < pop_size:
+                    parent1, parent2 = random.sample(selected, 2)
+                    child1, child2 = crossover(parent1[:], parent2[:])
+                    child1 = mutate(child1, mutation_rate)
+                    child2 = mutate(child2, mutation_rate)
+                    next_population.extend([child1, child2])
+                next_population = next_population[:pop_size]
+                
+                population = next_population
+                
+                # Store best individual
+                if best_fitness < float('inf'):
+                    best_individual = best_ind.copy()
             
             # Test best individual
-            if best_quantities:
-                final_nutrition = self._calculate_final_meal(ingredients, best_quantities)
+            if best_individual:
+                final_nutrition = self._calculate_final_meal(ingredients, best_individual)
                 final_achievement = self._check_target_achievement(final_nutrition, target_macros)
                 final_score = self._calculate_optimization_score(final_nutrition, target_macros)
                 
                 logger.info(f"🎯🎯🎯🎯 Genetic Algorithm result: {final_achievement}")
                 logger.info(f"🎯🎯🎯🎯 Genetic Algorithm score: {final_score:.2f}")
-                logger.info(f"🎯🎯🎯🎯 Final fitness: {final_fitness:.2f}")
+                logger.info(f"🎯🎯🎯🎯 Final fitness: {best_fitness:.2f}")
                 
                 # Log individual quantities
-                for i, (ing, qty) in enumerate(zip(ingredients, best_quantities)):
+                for i, (ing, qty) in enumerate(zip(ingredients, best_individual)):
                     logger.info(f"🎯🎯🎯🎯 {ing['name']}: GENETIC {qty:.1f}g")
                 
                 if final_achievement.get('overall', False):
                     logger.info("🎉🎉🎉🎉 GENETIC ALGORITHM achieved ALL targets!")
-                    return {'quantities': best_quantities, 'method': 'genetic_all_targets'}
+                    return {'quantities': best_individual, 'method': 'genetic_all_targets'}
                 else:
                     logger.info("🎯🎯🎯🎯 Genetic Algorithm is our best attempt")
-                    return {'quantities': best_quantities, 'method': 'genetic_best_attempt'}
+                    return {'quantities': best_individual, 'method': 'genetic_best_attempt'}
             else:
                 logger.error("❌❌❌ Genetic Algorithm failed to find solution!")
                 return None

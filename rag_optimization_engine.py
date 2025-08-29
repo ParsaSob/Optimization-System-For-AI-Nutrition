@@ -404,13 +404,13 @@ class RAGMealOptimizer:
                     logger.info(f"🎯 Fine-tuning calories: gap = {final_gaps['calories']:.1f}")
                     
                     # Find best ingredient to adjust for calories
-                    best_calorie_ingredient = None
+                    best_calorie_ingredient_idx = None
                     best_calorie_score = float('inf')
                     
-                    for ing in all_ingredients:
+                    for i, ing in enumerate(all_ingredients):
                         if ing.get('calories_per_100g', 0) > 0:
                             # Calculate how much we need to adjust this ingredient
-                            current_qty = final_result['quantities'].get(ing['name'], 0)
+                            current_qty = final_result['quantities'][i] if i < len(final_result['quantities']) else 0
                             calories_per_g = ing.get('calories_per_100g', 0) / 100.0
                             
                             if final_gaps['calories'] > 0:  # Need more calories
@@ -419,28 +419,29 @@ class RAGMealOptimizer:
                                     score = abs(calories_per_g - 3.0)  # Prefer ~3 cal/g ingredients
                                     if score < best_calorie_score:
                                         best_calorie_score = score
-                                        best_calorie_ingredient = ing
+                                        best_calorie_ingredient_idx = i
                             else:  # Need fewer calories
                                 # Find ingredient that can reduce calories efficiently
                                 if calories_per_g > 1.0:  # At least 1 calorie per gram
                                     score = calories_per_g  # Prefer higher calorie ingredients for reduction
                                     if score < best_calorie_score:
                                         best_calorie_score = score
-                                        best_calorie_ingredient = ing
+                                        best_calorie_ingredient_idx = i
                     
-                    if best_calorie_ingredient:
-                        current_qty = final_result['quantities'].get(best_calorie_ingredient['name'], 0)
+                    if best_calorie_ingredient_idx is not None:
+                        best_calorie_ingredient = all_ingredients[best_calorie_ingredient_idx]
+                        current_qty = final_result['quantities'][best_calorie_ingredient_idx] if best_calorie_ingredient_idx < len(final_result['quantities']) else 0
                         calories_per_g = best_calorie_ingredient.get('calories_per_100g', 0) / 100.0
                         
                         if final_gaps['calories'] > 0:  # Need more calories
                             additional_qty = min(final_gaps['calories'] / calories_per_g, 50)  # Max 50g increase
                             new_qty = current_qty + additional_qty
-                            fine_tuned_quantities[best_calorie_ingredient['name']] = round(new_qty, 1)
+                            fine_tuned_quantities[best_calorie_ingredient_idx] = round(new_qty, 1)
                             logger.info(f"🎯 Increased {best_calorie_ingredient['name']}: {current_qty:.1f}g → {new_qty:.1f}g (+{additional_qty:.1f}g)")
                         else:  # Need fewer calories
                             reduction_qty = min(abs(final_gaps['calories']) / calories_per_g, current_qty * 0.3)  # Max 30% reduction
                             new_qty = max(current_qty - reduction_qty, 5)  # Don't go below 5g
-                            fine_tuned_quantities[best_calorie_ingredient['name']] = round(new_qty, 1)
+                            fine_tuned_quantities[best_calorie_ingredient_idx] = round(new_qty, 1)
                             logger.info(f"🎯 Reduced {best_calorie_ingredient['name']}: {current_qty:.1f}g → {new_qty:.1f}g (-{reduction_qty:.1f}g)")
                 
                 # 2. FINE-TUNE PROTEIN
@@ -448,10 +449,10 @@ class RAGMealOptimizer:
                     logger.info(f"🎯 Fine-tuning protein: gap = {final_gaps['protein']:.1f}g")
                     
                     # Find best protein ingredient to adjust
-                    best_protein_ingredient = None
+                    best_protein_ingredient_idx = None
                     best_protein_score = float('inf')
                     
-                    for ing in all_ingredients:
+                    for i, ing in enumerate(all_ingredients):
                         if ing.get('protein_per_100g', 0) > 5:  # At least 5g protein per 100g
                             protein_per_g = ing.get('protein_per_100g', 0) / 100.0
                             
@@ -459,16 +460,17 @@ class RAGMealOptimizer:
                                 score = abs(protein_per_g - 0.2)  # Prefer ~20% protein ingredients
                                 if score < best_protein_score:
                                     best_protein_score = score
-                                    best_protein_ingredient = ing
+                                    best_protein_ingredient_idx = i
                     
-                    if best_protein_ingredient:
-                        current_qty = final_result['quantities'].get(best_protein_ingredient['name'], 0)
+                    if best_protein_ingredient_idx is not None:
+                        best_protein_ingredient = all_ingredients[best_protein_ingredient_idx]
+                        current_qty = final_result['quantities'][best_protein_ingredient_idx] if best_protein_ingredient_idx < len(final_result['quantities']) else 0
                         protein_per_g = best_protein_ingredient.get('protein_per_100g', 0) / 100.0
                         
                         if final_gaps['protein'] > 0:  # Need more protein
                             additional_qty = min(final_gaps['protein'] / protein_per_g, 40)  # Max 40g increase
                             new_qty = current_qty + additional_qty
-                            fine_tuned_quantities[best_protein_ingredient['name']] = round(new_qty, 1)
+                            fine_tuned_quantities[best_protein_ingredient_idx] = round(new_qty, 1)
                             logger.info(f"🎯 Increased {best_protein_ingredient['name']}: {current_qty:.1f}g → {new_qty:.1f}g (+{additional_qty:.1f}g)")
                 
                 # 3. FINE-TUNE FAT
@@ -476,10 +478,10 @@ class RAGMealOptimizer:
                     logger.info(f"🎯 Fine-tuning fat: gap = {final_gaps['fat']:.1f}g")
                     
                     # Find best fat ingredient to adjust
-                    best_fat_ingredient = None
+                    best_fat_ingredient_idx = None
                     best_fat_score = float('inf')
                     
-                    for ing in all_ingredients:
+                    for i, ing in enumerate(all_ingredients):
                         if ing.get('fat_per_100g', 0) > 2:  # At least 2g fat per 100g
                             fat_per_g = ing.get('fat_per_100g', 0) / 100.0
                             
@@ -487,16 +489,17 @@ class RAGMealOptimizer:
                                 score = abs(fat_per_g - 0.4)  # Prefer ~40% fat ingredients
                                 if score < best_fat_score:
                                     best_fat_score = score
-                                    best_fat_ingredient = ing
+                                    best_fat_ingredient_idx = i
                     
-                    if best_fat_ingredient:
-                        current_qty = final_result['quantities'].get(best_fat_ingredient['name'], 0)
+                    if best_fat_ingredient_idx is not None:
+                        best_fat_ingredient = all_ingredients[best_fat_ingredient_idx]
+                        current_qty = final_result['quantities'][best_fat_ingredient_idx] if best_fat_ingredient_idx < len(final_result['quantities']) else 0
                         fat_per_g = best_fat_ingredient.get('fat_per_100g', 0) / 100.0
                         
                         if final_gaps['fat'] > 0:  # Need more fat
                             additional_qty = min(final_gaps['fat'] / fat_per_g, 30)  # Max 30g increase
                             new_qty = current_qty + additional_qty
-                            fine_tuned_quantities[best_fat_ingredient['name']] = round(new_qty, 1)
+                            fine_tuned_quantities[best_fat_ingredient_idx] = round(new_qty, 1)
                             logger.info(f"🎯 Increased {best_fat_ingredient['name']}: {current_qty:.1f}g → {new_qty:.1f}g (+{additional_qty:.1f}g)")
                 
                 # Apply fine-tuned quantities
@@ -593,6 +596,22 @@ class RAGMealOptimizer:
                     final_result = re_optimized_result['result']
                     final_nutrition = re_optimized_result['nutrition']
                     final_target_achievement = re_optimized_result['achievement']
+                
+                # 🎯 NEW: Force target achievement if still not reached
+                if not final_target_achievement.get('overall', False):
+                    logger.info("🎯🎯🎯 Targets still not achieved - FORCING target achievement...")
+                    forced_result = self._force_target_achievement(all_ingredients, target_macros, final_nutrition)
+                    
+                    if forced_result:
+                        logger.info(f"🎉 Force target achievement successful with method: {forced_result['method']}")
+                        final_result = forced_result
+                        # Recalculate nutrition with forced quantities
+                        final_nutrition = self._calculate_final_meal(all_ingredients, forced_result['quantities'])
+                        final_target_achievement = self._check_target_achievement(final_nutrition, target_macros)
+                        logger.info(f"🎯🎯 After forcing - Achievement: {final_target_achievement}")
+                        logger.info(f"🎯🎯 After forcing - Totals: {final_nutrition}")
+                    else:
+                        logger.warning("⚠️ Force target achievement failed - using best available result")
 
             final_ingredients = self._materialize_ingredients(all_ingredients, final_result['quantities'])
             
@@ -3188,25 +3207,25 @@ class RAGMealOptimizer:
                     chosen_level = np.random.choice(levels, p=probabilities)
                     
                     new_qty = max(chosen_level, 10.0)
-                    max_qty = float(ing.get('max_quantity', 500))
-                    new_qty = min(new_qty, max_qty)
-                    
-                    new_quantities.append(new_qty)
+            max_qty = float(ing.get('max_quantity', 500))
+            new_qty = min(new_qty, max_qty)
+            
+            new_quantities.append(new_qty)
+            
+            ant_solutions.append(new_quantities)
+            
+            # Evaluate ant solution
+            try:
+                nutrition = self._calculate_final_meal(ingredients, new_quantities)
+                score = self._calculate_balance_score(nutrition, target_macros)
+                ant_scores.append(score)
                 
-                ant_solutions.append(new_quantities)
-                
-                # Evaluate ant solution
-                try:
-                    nutrition = self._calculate_final_meal(ingredients, new_quantities)
-                    score = self._calculate_balance_score(nutrition, target_macros)
-                    ant_scores.append(score)
+                if score < best_score:
+                    best_score = score
+                    best_result = new_quantities.copy()
                     
-                    if score < best_score:
-                        best_score = score
-                        best_result = new_quantities.copy()
-                        
-                except:
-                    ant_scores.append(float('inf'))
+            except:
+                ant_scores.append(float('inf'))
             
             # Update pheromones
             for i in range(len(ingredients)):
@@ -3400,7 +3419,7 @@ class RAGMealOptimizer:
                 new_qty = min(new_qty, max_qty)
                 
                 new_quantities.append(new_qty)
-            
+        
             # Test this combination
             try:
                 nutrition = self._calculate_final_meal(ingredients, new_quantities)
@@ -3417,6 +3436,358 @@ class RAGMealOptimizer:
             return {'quantities': best_result, 'method': 'brute_force'}
         
         return None
+
+    def _force_target_achievement(self, ingredients: List[Dict], target_macros: Dict, current_nutrition: Dict) -> Optional[Dict]:
+        """Force target achievement using extreme methods when normal optimization fails."""
+        logger.info("🎯🎯🎯 FORCING TARGET ACHIEVEMENT - Using extreme methods...")
+        
+        # Calculate current gaps
+        gaps = {}
+        for macro in ['protein', 'carbs', 'fat', 'calories']:
+            current = current_nutrition.get(macro, 0)
+            target = target_macros.get(macro, 0)
+            gap = target - current
+            gaps[macro] = gap
+            logger.info(f"🎯 {macro.capitalize()} gap: {gap:.2f}g")
+        
+        # Strategy 1: Extreme ingredient scaling
+        logger.info("🚀 Strategy 1: Extreme ingredient scaling...")
+        extreme_quantities = []
+        
+        for i, ing in enumerate(ingredients):
+            current_qty = ing.get('quantity_needed', 0)
+            
+            # Calculate scaling factors for each macro
+            scale_factors = []
+            
+            if gaps['protein'] > 0 and ing.get('protein_per_100g', 0) > 0:
+                protein_scale = (gaps['protein'] * 100) / ing.get('protein_per_100g', 1)
+                scale_factors.append(protein_scale)
+            
+            if gaps['carbs'] > 0 and ing.get('carbs_per_100g', 0) > 0:
+                carbs_scale = (gaps['carbs'] * 100) / ing.get('carbs_per_100g', 1)
+                scale_factors.append(carbs_scale)
+            
+            if gaps['fat'] > 0 and ing.get('fat_per_100g', 0) > 0:
+                fat_scale = (gaps['fat'] * 100) / ing.get('fat_per_100g', 1)
+                scale_factors.append(fat_scale)
+            
+            if gaps['calories'] > 0 and ing.get('calories_per_100g', 0) > 0:
+                calories_scale = (gaps['calories'] * 100) / ing.get('calories_per_100g', 1)
+                scale_factors.append(calories_scale)
+            
+            # Use the most aggressive scaling factor
+            max_scale = 1.0  # Default scale factor
+            if scale_factors:
+                max_scale = max(scale_factors)
+                # Limit scaling to reasonable bounds (0.1x to 10x)
+                max_scale = max(0.1, min(10.0, max_scale))
+                new_qty = current_qty * max_scale
+            else:
+                new_qty = current_qty
+            
+            # Ensure bounds
+            new_qty = max(new_qty, 1.0)  # Minimum 1g
+            max_qty = float(ing.get('max_quantity', 1000))
+            new_qty = min(new_qty, max_qty)
+            
+            extreme_quantities.append(new_qty)
+            logger.info(f"🎯 {ing['name']}: {current_qty:.1f}g → {new_qty:.1f}g (scale: {max_scale:.2f}x)")
+        
+        # Test extreme scaling
+        try:
+            extreme_nutrition = self._calculate_final_meal(ingredients, extreme_quantities)
+            extreme_achievement = self._check_target_achievement(extreme_nutrition, target_macros)
+            extreme_score = self._calculate_optimization_score(extreme_nutrition, target_macros)
+            
+            logger.info(f"🎯 Extreme scaling result: {extreme_achievement}")
+            logger.info(f"🎯 Extreme scaling score: {extreme_score:.2f}")
+            
+            if extreme_achievement.get('overall', False):
+                logger.info("🎉 Extreme scaling achieved targets!")
+                return {'quantities': extreme_quantities, 'method': 'extreme_scaling'}
+        except Exception as e:
+            logger.warning(f"⚠️ Extreme scaling failed: {e}")
+        
+        # Strategy 2: Add missing ingredients with exact quantities
+        logger.info("🚀 Strategy 2: Adding missing ingredients with exact quantities...")
+        
+        # Find what we're missing exactly
+        missing_ingredients = []
+        
+        for macro, gap in gaps.items():
+            if gap > 0:  # We need more of this macro
+                # Find best ingredient for this macro
+                best_ingredient = None
+                best_score = 0
+                
+                for ing in ingredients:
+                    macro_per_100g = ing.get(f'{macro}_per_100g', 0)
+                    if macro_per_100g > 0:
+                        # Calculate how much we need of this ingredient
+                        needed_amount = (gap * 100) / macro_per_100g
+                        
+                        # Score based on efficiency (higher macro per 100g = better)
+                        score = macro_per_100g
+                        
+                        if score > best_score:
+                            best_score = score
+                            best_ingredient = {
+                                'name': ing['name'],
+                                'quantity_needed': needed_amount,
+                                'macro': macro,
+                                'gap': gap
+                            }
+                
+                if best_ingredient:
+                    missing_ingredients.append(best_ingredient)
+                    logger.info(f"🎯 Need {best_ingredient['quantity_needed']:.1f}g of {best_ingredient['name']} for {best_ingredient['gap']:.1f}g {best_ingredient['macro']}")
+        
+        # Strategy 3: Force target by adjusting existing ingredients
+        logger.info("🚀 Strategy 3: Force target by adjusting existing ingredients...")
+        
+        force_quantities = []
+        for i, ing in enumerate(ingredients):
+            current_qty = ing.get('quantity_needed', 0)
+            
+            # Calculate what we need to add to reach targets
+            adjustments = []
+            
+            for macro, gap in gaps.items():
+                if gap > 0:  # Need more
+                    macro_per_100g = ing.get(f'{macro}_per_100g', 0)
+                    if macro_per_100g > 0:
+                        # Calculate how much more we need
+                        additional_needed = gap * 0.1  # Take 10% of the gap
+                        additional_qty = (additional_needed * 100) / macro_per_100g
+                        adjustments.append(additional_qty)
+            
+            if adjustments:
+                # Add the average adjustment
+                avg_adjustment = sum(adjustments) / len(adjustments)
+                new_qty = current_qty + avg_adjustment
+                new_qty = max(new_qty, 1.0)
+                max_qty = float(ing.get('max_quantity', 1000))
+                new_qty = min(new_qty, max_qty)
+                
+                force_quantities.append(new_qty)
+                logger.info(f"🎯 {ing['name']}: {current_qty:.1f}g → {new_qty:.1f}g (+{avg_adjustment:.1f}g)")
+            else:
+                force_quantities.append(current_qty)
+        
+        # Test force adjustment
+        try:
+            force_nutrition = self._calculate_final_meal(ingredients, force_quantities)
+            force_achievement = self._check_target_achievement(force_nutrition, target_macros)
+            force_score = self._calculate_optimization_score(force_nutrition, target_macros)
+            
+            logger.info(f"🎯 Force adjustment result: {force_achievement}")
+            logger.info(f"🎯 Force adjustment score: {force_score:.2f}")
+            
+            if force_achievement.get('overall', False):
+                logger.info("🎉 Force adjustment achieved targets!")
+                return {'quantities': force_quantities, 'method': 'force_adjustment'}
+        except Exception as e:
+            logger.warning(f"⚠️ Force adjustment failed: {e}")
+        
+        # Strategy 4: Last resort - create synthetic balanced meal
+        logger.info("🚀 Strategy 4: Last resort - create synthetic balanced meal...")
+        
+        # Create a perfectly balanced meal by ignoring ingredient constraints
+        synthetic_quantities = []
+        total_calories = target_macros['calories']
+        
+        for i, ing in enumerate(ingredients):
+            calories_per_100g = ing.get('calories_per_100g', 0)
+            if calories_per_100g > 0:
+                # Calculate quantity to get exactly the target calories
+                target_qty = (total_calories * 100) / (calories_per_100g * len(ingredients))
+                synthetic_quantities.append(target_qty)
+                logger.info(f"🎯 {ing['name']}: synthetic {target_qty:.1f}g for balanced calories")
+            else:
+                synthetic_quantities.append(ing.get('quantity_needed', 0))
+        
+        try:
+            synthetic_nutrition = self._calculate_final_meal(ingredients, synthetic_quantities)
+            synthetic_achievement = self._check_target_achievement(synthetic_nutrition, target_macros)
+            synthetic_score = self._calculate_optimization_score(synthetic_nutrition, target_macros)
+            
+            logger.info(f"🎯 Synthetic meal result: {synthetic_achievement}")
+            logger.info(f"🎯 Synthetic meal score: {synthetic_score:.2f}")
+            
+            # Continue to next strategies even if synthetic meal doesn't achieve ALL targets
+            logger.info("🎯 Synthetic meal completed, continuing to next strategies...")
+        except Exception as e:
+            logger.warning(f"⚠️ Synthetic meal failed: {e}")
+        
+        # 🚀 FINAL GENETIC ALGORITHM: Last chance to reach ALL targets
+        logger.info("🚀🚀🚀🚀🚀🚀 FINAL GENETIC ALGORITHM: Last chance to reach ALL targets...")
+        
+        # Calculate what we need for each macro
+        final_gaps = {}
+        for macro in ['protein', 'carbs', 'fat', 'calories']:
+            current = current_nutrition.get(macro, 0)
+            target = target_macros.get(macro, 0)
+            gap = target - current
+            final_gaps[macro] = gap
+            logger.info(f"🎯🎯🎯 Final {macro} gap: {gap:.2f}g")
+        
+        # Use GENETIC ALGORITHM to find optimal quantities
+        try:
+            # Define the macros we care about (using existing naming convention)
+            MACROS = ['calories', 'carbs', 'fat', 'protein']
+            
+            def fitness(individual, ingredients, target):
+                """
+                Calculate the fitness as the sum of absolute differences from the target macros.
+                Lower is better (we want to minimize the difference).
+                Assumes macros are per 100g, and quantities are in grams.
+                """
+                totals = {macro: 0.0 for macro in MACROS}
+                for i, qty in enumerate(individual):
+                    for macro in MACROS:
+                        if macro == 'calories':
+                            macro_key = 'calories_per_100g'
+                        elif macro == 'carbs':
+                            macro_key = 'carbs_per_100g'
+                        elif macro == 'fat':
+                            macro_key = 'fat_per_100g'
+                        elif macro == 'protein':
+                            macro_key = 'protein_per_100g'
+                        
+                        totals[macro] += (qty * ingredients[i].get(macro_key, 0)) / 100.0
+                
+                diff = sum(abs(totals[macro] - target.get(macro, 0)) for macro in MACROS)
+                return diff
+            
+            def create_individual(num_ingredients, max_qty=1000.0):
+                """
+                Create a random individual: list of quantities for each ingredient.
+                """
+                return [random.uniform(0, max_qty) for _ in range(num_ingredients)]
+            
+            def create_population(pop_size, num_ingredients, max_qty=1000.0):
+                return [create_individual(num_ingredients, max_qty) for _ in range(pop_size)]
+            
+            def selection(population, fitnesses, k=3):
+                """
+                Tournament selection: select the best from k random individuals.
+                """
+                selected = []
+                for _ in range(len(population)):
+                    candidates = random.sample(range(len(population)), k)
+                    best = min(candidates, key=lambda i: fitnesses[i])
+                    selected.append(population[best])
+                return selected
+            
+            def crossover(parent1, parent2):
+                """
+                Single-point crossover.
+                """
+                point = random.randint(1, len(parent1) - 1)
+                child1 = parent1[:point] + parent2[point:]
+                child2 = parent2[:point] + parent1[point:]
+                return child1, child2
+            
+            def mutate(individual, mutation_rate=0.1, sigma=10.0):
+                """
+                Gaussian mutation: add noise to each gene with probability mutation_rate.
+                """
+                for i in range(len(individual)):
+                    if random.random() < mutation_rate:
+                        individual[i] += np.random.normal(0, sigma)
+                        individual[i] = max(0, individual[i])  # No negative quantities
+                        # Apply max quantity constraint
+                        max_qty = float(ingredients[i].get('max_quantity', 1000))
+                        individual[i] = min(individual[i], max_qty)
+                return individual
+            
+            def genetic_algorithm(ingredients, target, pop_size=100, generations=200, mutation_rate=0.1, max_qty=1000.0):
+                num_ingredients = len(ingredients)
+                population = create_population(pop_size, num_ingredients, max_qty)
+                
+                for gen in range(generations):
+                    fitnesses = [fitness(ind, ingredients, target) for ind in population]
+                    
+                    # Elitism: keep the best individual
+                    best_idx = np.argmin(fitnesses)
+                    best_ind = population[best_idx]
+                    best_fitness = fitnesses[best_idx]
+                    
+                    if gen % 20 == 0:
+                        logger.info(f"🎯🎯🎯 Generation {gen}: Best fitness = {best_fitness:.2f}")
+                    
+                    # Selection
+                    selected = selection(population, fitnesses)
+                    
+                    # Create next generation
+                    next_population = [best_ind]  # Elitism
+                    while len(next_population) < pop_size:
+                        parent1, parent2 = random.sample(selected, 2)
+                        child1, child2 = crossover(parent1[:], parent2[:])
+                        child1 = mutate(child1, mutation_rate)
+                        child2 = mutate(child2, mutation_rate)
+                        next_population.extend([child1, child2])
+                    next_population = next_population[:pop_size]
+                    
+                    population = next_population
+                
+                # Final best
+                fitnesses = [fitness(ind, ingredients, target) for ind in population]
+                best_idx = np.argmin(fitnesses)
+                best_ind = population[best_idx]
+                best_fitness = fitnesses[best_idx]
+                
+                # Compute final totals
+                totals = {macro: 0.0 for macro in MACROS}
+                for i, qty in enumerate(best_ind):
+                    for macro in MACROS:
+                        if macro == 'calories':
+                            macro_key = 'calories_per_100g'
+                        elif macro == 'carbs':
+                            macro_key = 'carbs_per_100g'
+                        elif macro == 'fat':
+                            macro_key = 'fat_per_100g'
+                        elif macro == 'protein':
+                            macro_key = 'protein_per_100g'
+                        
+                        totals[macro] += (qty * ingredients[i].get(macro_key, 0)) / 100.0
+                
+                return best_ind, totals, best_fitness
+            
+            # Run genetic algorithm
+            best_quantities, final_totals, final_fitness = genetic_algorithm(
+                ingredients, target_macros, pop_size=100, generations=200, mutation_rate=0.1, max_qty=1000.0
+            )
+            
+            # Test best individual
+            if best_quantities:
+                final_nutrition = self._calculate_final_meal(ingredients, best_quantities)
+                final_achievement = self._check_target_achievement(final_nutrition, target_macros)
+                final_score = self._calculate_optimization_score(final_nutrition, target_macros)
+                
+                logger.info(f"🎯🎯🎯🎯 Genetic Algorithm result: {final_achievement}")
+                logger.info(f"🎯🎯🎯🎯 Genetic Algorithm score: {final_score:.2f}")
+                logger.info(f"🎯🎯🎯🎯 Final fitness: {final_fitness:.2f}")
+                
+                # Log individual quantities
+                for i, (ing, qty) in enumerate(zip(ingredients, best_quantities)):
+                    logger.info(f"🎯🎯🎯🎯 {ing['name']}: GENETIC {qty:.1f}g")
+                
+                if final_achievement.get('overall', False):
+                    logger.info("🎉🎉🎉🎉 GENETIC ALGORITHM achieved ALL targets!")
+                    return {'quantities': best_quantities, 'method': 'genetic_all_targets'}
+                else:
+                    logger.info("🎯🎯🎯🎯 Genetic Algorithm is our best attempt")
+                    return {'quantities': best_quantities, 'method': 'genetic_best_attempt'}
+            else:
+                logger.error("❌❌❌ Genetic Algorithm failed to find solution!")
+                return None
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Genetic Algorithm failed: {e}")
+            logger.error("❌❌❌ All strategies failed! Returning None")
+            return None
 
     def _balance_by_miracle_optimization(self, ingredients: List[Dict], target_macros: Dict, gaps: Dict) -> Optional[Dict]:
         """Balance using miracle optimization - multiple strategies combined with extreme parameters."""
@@ -4431,3 +4802,4 @@ class RAGMealOptimizer:
         
     # REMOVED: _run_genetic_algorithm_final - Unrealistic method with extreme parameters
 
+            

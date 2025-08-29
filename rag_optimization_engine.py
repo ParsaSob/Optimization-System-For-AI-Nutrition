@@ -436,7 +436,7 @@ class RAGMealOptimizer:
             # Merge (as candidates) – no preset quantities; let optimizer decide.
             all_ingredients = self._merge_ingredients_for_reopt(rag_ingredients, helper_ingredients)
             
-            logger.info(f"🔁 Re-optimizing with {len(all_ingredients)} ingredients (including {len([h for h in all_ingredients if '_balancing_amount' in h])} helpers)...")
+            logger.info(f"🔁 Re-optimizing with {len(all_ingredients)} ingredients (including {len(helper_ingredients)} helpers)...")
 
             # ---- STEP 3: Re-optimize on the full set ----
             final_result = self._run_optimization_methods(all_ingredients, target_macros)
@@ -725,7 +725,7 @@ class RAGMealOptimizer:
             computation_time = time.time() - start_time
 
             return self._format_output(final_ingredients, final_result, final_nutrition,
-                                       final_target_achievement, helper_ingredients,
+                                       final_target_achievement, deficit_helpers, balancing_helpers,
                                        computation_time, request_data)
 
         except Exception as e:
@@ -790,7 +790,7 @@ class RAGMealOptimizer:
     # --------------------- Helpers: Orchestration & Output ---------------------
 
     def _format_output(self, final_ingredients: List[Dict], opt_result: Dict, totals: Dict,
-                       achievement: Dict, helper_ingredients_added: List[Dict],
+                       achievement: Dict, deficit_helpers: List[Dict], balancing_helpers: List[Dict],
                        computation_time: float, request_data: Optional[Dict]) -> Dict:
         # Format meal for output
         formatted_meal = []
@@ -824,9 +824,9 @@ class RAGMealOptimizer:
                 "calories_per_100g": ing.get('calories_per_100g', 0)
             })
 
-        # Format helper ingredients to include complete information
-        formatted_helpers = []
-        for helper in helper_ingredients_added:
+        # Format deficit helper ingredients to include complete information
+        formatted_deficit_helpers = []
+        for helper in deficit_helpers:
             formatted_helper = {
                 "name": helper['name'].replace('_', ' ').title(),
                 "quantity_needed": round(max(0.0, helper.get('quantity_needed', 0.0)), 1),
@@ -836,8 +836,22 @@ class RAGMealOptimizer:
                 "carbs": round(helper.get('carbs_per_100g', 0) * helper.get('quantity_needed', 0) / 100, 1),
                 "fat": round(helper.get('fat_per_100g', 0) * helper.get('quantity_needed', 0) / 100, 1)
             }
-            formatted_helpers.append(formatted_helper)
-        
+            formatted_deficit_helpers.append(formatted_helper)
+
+        # Format balancing ingredients to include complete information
+        formatted_balancing_helpers = []
+        for balancer in balancing_helpers:
+            formatted_balancer = {
+                "name": balancer['name'].replace('_', ' ').title(),
+                "quantity_needed": round(max(0.0, balancer.get('quantity_needed', 0.0)), 1),
+                "unit": "g",
+                "calories": round(balancer.get('calories_per_100g', 0) * balancer.get('quantity_needed', 0) / 100, 1),
+                "protein": round(balancer.get('protein_per_100g', 0) * balancer.get('quantity_needed', 0) / 100, 1),
+                "carbs": round(balancer.get('carbs_per_100g', 0) * balancer.get('quantity_needed', 0) / 100, 1),
+                "fat": round(balancer.get('fat_per_100g', 0) * balancer.get('quantity_needed', 0) / 100, 1)
+            }
+            formatted_balancing_helpers.append(formatted_balancer)
+
         return {
             "user_id": request_data.get('user_id', 'default_user') if request_data else 'default_user',
             "success": True,
@@ -849,7 +863,8 @@ class RAGMealOptimizer:
             "meal": formatted_meal,
             "nutritional_totals": totals,
             "target_achievement": achievement,
-            "helper_ingredients_added": formatted_helpers,
+            "helper_ingredients_added": formatted_deficit_helpers,
+            "balancing_ingredients_added": formatted_balancing_helpers,
             "optimization_steps": {
                 "step1": "Initial optimization with advanced methods",
                 "step2": "Helper ingredients added if needed",

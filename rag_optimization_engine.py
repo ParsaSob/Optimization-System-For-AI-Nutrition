@@ -289,7 +289,7 @@ class RAGMealOptimizer:
                     logger.info(f"📈 {macro.capitalize()} excess: {abs(diff):.1f}g")
             
             # TARGET-AWARE HELPER ADDITION: Only add helpers if we're significantly under targets
-            significant_deficits = {k: v for k, v in deficits.items() if v > 2}  # Only if deficit > 2g/cal (more sensitive)
+            significant_deficits = {k: v for k, v in deficits.items() if v > 1}  # Reduced threshold to 1g (more sensitive)
             
             # Add helper ingredients for deficits (with quantity limits)
             deficit_helpers = []
@@ -315,14 +315,26 @@ class RAGMealOptimizer:
             
             # Add balancing ingredients for excesses (with strict limits)
             balancing_helpers = []
-            if excesses:
+            if excesses and any(v > 1 for v in excesses.values()):  # Only if excess > 1g
                 logger.info(f"⚖️ Adding balancing ingredients for excesses: {excesses}")
+                logger.info(f"🔍 Excess details: {excesses}")
+                
+                # Debug: Check if we have excess macros
+                for macro, amount in excesses.items():
+                    if amount > 1:
+                        logger.info(f"🔍 {macro} excess: {amount:.1f}g > 1g threshold")
+                
                 balancing_helpers = self._add_balancing_ingredients_candidates(
                     current_ingredients=self._materialize_ingredients(rag_ingredients, initial_result['quantities']),
                     target_macros=target_macros,
                     meal_type=meal_type,
                     excess_macros=list(excesses.keys())
                 )
+                
+                logger.info(f"🔍 Balancing candidates returned: {len(balancing_helpers)}")
+                if balancing_helpers:
+                    for i, balancer in enumerate(balancing_helpers):
+                        logger.info(f"🔍 Balancer {i+1}: {balancer['name']} - {balancer.get('quantity_needed', 'N/A')}g")
                 
                 # LIMIT BALANCING QUANTITIES: Very strict limits
                 max_balancing_quantity = 50  # Max 50g per balancing ingredient (increased)
@@ -334,6 +346,20 @@ class RAGMealOptimizer:
                 logger.info(f"⚖️ Added {len(balancing_helpers)} limited balancing helper ingredients")
             else:
                 logger.info("⚖️ No excesses - skipping balancing helpers")
+            
+            # ALWAYS add balancing ingredients if there are excesses, regardless of overall achievement
+            if excesses and any(v > 1 for v in excesses.values()) and not balancing_helpers:
+                logger.info(f"🔄 Forcing balancing ingredients for excesses: {excesses}")
+                # Try to add minimal balancing ingredients
+                for excess_macro, excess_amount in excesses.items():
+                    if excess_amount > 1:
+                        logger.info(f"🔄 Adding minimal balancing for {excess_macro} excess: {excess_amount:.1f}g")
+                        # Add a small amount of balancing ingredient
+                        minimal_balancer = self._select_best_helper_candidate(meal_type, excess_macro, set())
+                        if minimal_balancer:
+                            minimal_balancer['quantity_needed'] = min(20, excess_amount * 2)  # Small amount
+                            balancing_helpers.append(minimal_balancer)
+                            logger.info(f"✅ Added minimal balancer: {minimal_balancer['name']} ({minimal_balancer['quantity_needed']}g)")
             
             # Combine all helpers
             helper_ingredients = deficit_helpers + balancing_helpers

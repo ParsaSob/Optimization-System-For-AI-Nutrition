@@ -724,7 +724,53 @@ class RAGMealOptimizer:
             
             computation_time = time.time() - start_time
 
-            return self._format_output(final_ingredients, final_result, final_nutrition,
+            # Recalculate final nutrition from materialized ingredients to ensure consistency
+            recalculated_nutrition = self._calculate_final_meal(final_ingredients, [ing.get('quantity_needed', 0) for ing in final_ingredients])
+            logger.info(f"🔧 Recalculated final nutrition from materialized ingredients: {recalculated_nutrition}")
+            
+            # NEW LOGIC: Remove ingredients with less than 10g and re-optimize
+            ingredients_to_remove = []
+            for i, ing in enumerate(final_ingredients):
+                if ing.get('quantity_needed', 0) < 10.0:
+                    ingredients_to_remove.append(i)
+                    logger.info(f"🗑️ Marking {ing['name']} for removal (quantity: {ing.get('quantity_needed', 0):.1f}g < 10g)")
+            
+            if ingredients_to_remove:
+                logger.info(f"🔧 Removing {len(ingredients_to_remove)} ingredients with <10g and re-optimizing...")
+                
+                # Remove low-quantity ingredients
+                filtered_ingredients = [ing for i, ing in enumerate(final_ingredients) if i not in ingredients_to_remove]
+                logger.info(f"🔧 Remaining ingredients after filtering: {len(filtered_ingredients)}")
+                
+                # Re-optimize with filtered ingredients
+                try:
+                    reopt_result = self._run_optimization_methods(filtered_ingredients, target_macros)
+                    reopt_nutrition = self._calculate_final_meal(filtered_ingredients, reopt_result['quantities'])
+                    reopt_achievement = self._check_target_achievement(reopt_nutrition, target_macros)
+                    
+                    logger.info(f"🔧 Re-optimization result: {reopt_achievement}")
+                    logger.info(f"🔧 Re-optimization nutrition: {reopt_nutrition}")
+                    
+                    # Check if re-optimization improved target achievement
+                    original_achieved = sum(final_target_achievement.values())
+                    reopt_achieved = sum(reopt_achievement.values())
+                    
+                    if reopt_achieved >= original_achieved:
+                        logger.info(f"✅ Re-optimization improved results! Using filtered ingredients.")
+                        # Use re-optimized results
+                        final_ingredients = filtered_ingredients
+                        final_result = reopt_result
+                        recalculated_nutrition = reopt_nutrition
+                        final_target_achievement = reopt_achievement
+                    else:
+                        logger.warning(f"⚠️ Re-optimization worsened results! Keeping original ingredients.")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Re-optimization failed: {e}. Keeping original ingredients.")
+            else:
+                logger.info("✅ No ingredients with <10g to remove.")
+            
+            return self._format_output(final_ingredients, final_result, recalculated_nutrition,
                                        final_target_achievement, deficit_helpers, balancing_helpers,
                                        computation_time, request_data)
 
@@ -895,10 +941,12 @@ class RAGMealOptimizer:
             original_qty = ing.get('quantity_needed', ing.get('quantity', 0))
             optimized_qty = max(0.0, float(quantities[i]))
             
-            # Ensure input ingredients maintain reasonable quantities
-            if original_qty > 0 and optimized_qty < 10.0:
-                logger.info(f"   ⚠️ Input ingredient '{ing['name']}' quantity too low ({optimized_qty:.1f}g), preserving minimum")
-                optimized_qty = max(10.0, original_qty * 0.1)  # At least 10g or 10% of original
+            # CRITICAL FIX: Preserve optimization results, only apply minimum for very small quantities
+            if original_qty > 0 and optimized_qty < 1.0:  # Only for extremely small quantities
+                logger.info(f"   ⚠️ Input ingredient '{ing['name']}' quantity extremely low ({optimized_qty:.1f}g), applying minimal adjustment")
+                optimized_qty = max(1.0, optimized_qty)  # Just ensure it's not zero
+            elif optimized_qty < 0.1:  # For near-zero quantities
+                optimized_qty = 0.0  # Allow zero quantities
             
             ing['quantity_needed'] = optimized_qty
             logger.info(f"   - {ing['name']}: original={original_qty}g, optimized={optimized_qty:.1f}g")

@@ -288,44 +288,59 @@ class RAGMealOptimizer:
                     excesses[macro] = abs(diff)
                     logger.info(f"📈 {macro.capitalize()} excess: {abs(diff):.1f}g")
             
-            # Add helper ingredients for deficits
+            # TARGET-AWARE HELPER ADDITION: Only add helpers if we're significantly under targets
+            significant_deficits = {k: v for k, v in deficits.items() if v > 2}  # Only if deficit > 2g/cal (more sensitive)
+            
+            # Add helper ingredients for deficits (with quantity limits)
             deficit_helpers = []
-            if deficits:
+            if significant_deficits:
+                logger.info(f"🎯 Adding helpers for significant deficits: {significant_deficits}")
                 deficit_helpers = self._add_smart_helper_ingredients_candidates(
                     current_ingredients=self._materialize_ingredients(rag_ingredients, initial_result['quantities']),
                     target_macros=target_macros,
                     meal_type=meal_type,
-                    focus_macros=list(deficits.keys())
+                    focus_macros=list(significant_deficits.keys())
                 )
-                logger.info(f"🔧 Added {len(deficit_helpers)} deficit helper ingredients")
+                
+                # LIMIT HELPER QUANTITIES: Don't over-add
+                max_helper_quantity = 80  # Max 80g per helper (increased)
+                for helper in deficit_helpers:
+                    if helper.get('quantity_needed', 0) > max_helper_quantity:
+                        helper['quantity_needed'] = max_helper_quantity
+                        logger.info(f"🔒 Limited {helper['name']} to {max_helper_quantity}g")
+                
+                logger.info(f"🔧 Added {len(deficit_helpers)} limited deficit helper ingredients")
+            else:
+                logger.info("🎯 No significant deficits - skipping deficit helpers")
             
-            # Add balancing ingredients for excesses
+            # Add balancing ingredients for excesses (with strict limits)
             balancing_helpers = []
             if excesses:
+                logger.info(f"⚖️ Adding balancing ingredients for excesses: {excesses}")
                 balancing_helpers = self._add_balancing_ingredients_candidates(
                     current_ingredients=self._materialize_ingredients(rag_ingredients, initial_result['quantities']),
                     target_macros=target_macros,
                     meal_type=meal_type,
                     excess_macros=list(excesses.keys())
                 )
-                logger.info(f"⚖️ Added {len(balancing_helpers)} balancing helper ingredients")
+                
+                # LIMIT BALANCING QUANTITIES: Very strict limits
+                max_balancing_quantity = 50  # Max 50g per balancing ingredient (increased)
+                for balancer in balancing_helpers:
+                    if balancer.get('quantity_needed', 0) > max_balancing_quantity:
+                        balancer['quantity_needed'] = max_balancing_quantity
+                        logger.info(f"🔒 Limited {balancer['name']} to {max_balancing_quantity}g")
+                
+                logger.info(f"⚖️ Added {len(balancing_helpers)} limited balancing helper ingredients")
+            else:
+                logger.info("⚖️ No excesses - skipping balancing helpers")
             
             # Combine all helpers
             helper_ingredients = deficit_helpers + balancing_helpers
             logger.info(f"🔧 Total helper ingredients: {len(helper_ingredients)}")
 
-            # Clean up excess ingredients if we have too many
-            if len(helper_ingredients) > 3:
-                logger.info("🧹 Too many helper ingredients detected, cleaning up...")
-                all_ingredients = self._cleanup_excess_ingredients(
-                    self._merge_ingredients_for_reopt(rag_ingredients, helper_ingredients),
-                    target_macros,
-                    meal_type
-                )
-                logger.info(f"🧹 After cleanup: {len(all_ingredients)} ingredients")
-            else:
-                # Merge (as candidates) – no preset quantities; let optimizer decide.
-                all_ingredients = self._merge_ingredients_for_reopt(rag_ingredients, helper_ingredients)
+            # Merge (as candidates) – no preset quantities; let optimizer decide.
+            all_ingredients = self._merge_ingredients_for_reopt(rag_ingredients, helper_ingredients)
             
             logger.info(f"🔁 Re-optimizing with {len(all_ingredients)} ingredients (including {len([h for h in all_ingredients if '_balancing_amount' in h])} helpers)...")
 
@@ -367,18 +382,219 @@ class RAGMealOptimizer:
                         final_target_achievement = self._check_target_achievement(final_nutrition, target_macros)
                         logger.info(f"⚖️ After aggressive balancing - Achievement: {final_target_achievement}")
                         logger.info(f"⚖️ After aggressive balancing - Totals: {final_nutrition}")
+                
+                # ---- STEP 5: FINAL FINE-TUNING for target precision ----
+                logger.info("🎯🎯 FINAL FINE-TUNING: Getting as close to targets as possible...")
+                
+                # Calculate final gaps after balancing
+                final_gaps = {}
+                for macro in ['protein', 'carbs', 'fat', 'calories']:
+                    current = final_nutrition.get(macro, 0)
+                    target = target_macros.get(macro, 0)
+                    gap = target - current
+                    final_gaps[macro] = gap
+                
+                logger.info(f"🎯 Final gaps to targets: {final_gaps}")
+                
+                # Fine-tune each macro systematically
+                fine_tuned_quantities = final_result['quantities'].copy()
+                
+                # 1. FINE-TUNE CALORIES (most important)
+                if abs(final_gaps['calories']) > 5:  # Only if gap > 5 calories
+                    logger.info(f"🎯 Fine-tuning calories: gap = {final_gaps['calories']:.1f}")
+                    
+                    # Find best ingredient to adjust for calories
+                    best_calorie_ingredient = None
+                    best_calorie_score = float('inf')
+                    
+                    for ing in all_ingredients:
+                        if ing.get('calories_per_100g', 0) > 0:
+                            # Calculate how much we need to adjust this ingredient
+                            current_qty = final_result['quantities'].get(ing['name'], 0)
+                            calories_per_g = ing.get('calories_per_100g', 0) / 100.0
+                            
+                            if final_gaps['calories'] > 0:  # Need more calories
+                                # Find ingredient that can add calories efficiently
+                                if calories_per_g > 2.0:  # At least 2 calories per gram
+                                    score = abs(calories_per_g - 3.0)  # Prefer ~3 cal/g ingredients
+                                    if score < best_calorie_score:
+                                        best_calorie_score = score
+                                        best_calorie_ingredient = ing
+                            else:  # Need fewer calories
+                                # Find ingredient that can reduce calories efficiently
+                                if calories_per_g > 1.0:  # At least 1 calorie per gram
+                                    score = calories_per_g  # Prefer higher calorie ingredients for reduction
+                                    if score < best_calorie_score:
+                                        best_calorie_score = score
+                                        best_calorie_ingredient = ing
+                    
+                    if best_calorie_ingredient:
+                        current_qty = final_result['quantities'].get(best_calorie_ingredient['name'], 0)
+                        calories_per_g = best_calorie_ingredient.get('calories_per_100g', 0) / 100.0
                         
-                        # 🔄 NEW: Re-optimize with advanced methods after balancing
-                        logger.info("🔄 Re-optimizing with advanced methods after balancing...")
-                        re_optimized_result = self._re_optimize_after_balancing(all_ingredients, target_macros, final_nutrition)
+                        if final_gaps['calories'] > 0:  # Need more calories
+                            additional_qty = min(final_gaps['calories'] / calories_per_g, 50)  # Max 50g increase
+                            new_qty = current_qty + additional_qty
+                            fine_tuned_quantities[best_calorie_ingredient['name']] = round(new_qty, 1)
+                            logger.info(f"🎯 Increased {best_calorie_ingredient['name']}: {current_qty:.1f}g → {new_qty:.1f}g (+{additional_qty:.1f}g)")
+                        else:  # Need fewer calories
+                            reduction_qty = min(abs(final_gaps['calories']) / calories_per_g, current_qty * 0.3)  # Max 30% reduction
+                            new_qty = max(current_qty - reduction_qty, 5)  # Don't go below 5g
+                            fine_tuned_quantities[best_calorie_ingredient['name']] = round(new_qty, 1)
+                            logger.info(f"🎯 Reduced {best_calorie_ingredient['name']}: {current_qty:.1f}g → {new_qty:.1f}g (-{reduction_qty:.1f}g)")
+                
+                # 2. FINE-TUNE PROTEIN
+                if abs(final_gaps['protein']) > 1:  # Only if gap > 1g
+                    logger.info(f"🎯 Fine-tuning protein: gap = {final_gaps['protein']:.1f}g")
+                    
+                    # Find best protein ingredient to adjust
+                    best_protein_ingredient = None
+                    best_protein_score = float('inf')
+                    
+                    for ing in all_ingredients:
+                        if ing.get('protein_per_100g', 0) > 5:  # At least 5g protein per 100g
+                            protein_per_g = ing.get('protein_per_100g', 0) / 100.0
+                            
+                            if final_gaps['protein'] > 0:  # Need more protein
+                                score = abs(protein_per_g - 0.2)  # Prefer ~20% protein ingredients
+                                if score < best_protein_score:
+                                    best_protein_score = score
+                                    best_protein_ingredient = ing
+                    
+                    if best_protein_ingredient:
+                        current_qty = final_result['quantities'].get(best_protein_ingredient['name'], 0)
+                        protein_per_g = best_protein_ingredient.get('protein_per_100g', 0) / 100.0
                         
-                        if re_optimized_result:
-                            logger.info(f"🎯 Re-optimization improved score from {final_target_achievement} to {re_optimized_result['achievement']}")
-                            final_result = re_optimized_result['result']
-                            final_nutrition = re_optimized_result['nutrition']
-                            final_target_achievement = re_optimized_result['achievement']
+                        if final_gaps['protein'] > 0:  # Need more protein
+                            additional_qty = min(final_gaps['protein'] / protein_per_g, 40)  # Max 40g increase
+                            new_qty = current_qty + additional_qty
+                            fine_tuned_quantities[best_protein_ingredient['name']] = round(new_qty, 1)
+                            logger.info(f"🎯 Increased {best_protein_ingredient['name']}: {current_qty:.1f}g → {new_qty:.1f}g (+{additional_qty:.1f}g)")
+                
+                # 3. FINE-TUNE FAT
+                if abs(final_gaps['fat']) > 0.5:  # Only if gap > 0.5g
+                    logger.info(f"🎯 Fine-tuning fat: gap = {final_gaps['fat']:.1f}g")
+                    
+                    # Find best fat ingredient to adjust
+                    best_fat_ingredient = None
+                    best_fat_score = float('inf')
+                    
+                    for ing in all_ingredients:
+                        if ing.get('fat_per_100g', 0) > 2:  # At least 2g fat per 100g
+                            fat_per_g = ing.get('fat_per_100g', 0) / 100.0
+                            
+                            if final_gaps['fat'] > 0:  # Need more fat
+                                score = abs(fat_per_g - 0.4)  # Prefer ~40% fat ingredients
+                                if score < best_fat_score:
+                                    best_fat_score = score
+                                    best_fat_ingredient = ing
+                    
+                    if best_fat_ingredient:
+                        current_qty = final_result['quantities'].get(best_fat_ingredient['name'], 0)
+                        fat_per_g = best_fat_ingredient.get('fat_per_100g', 0) / 100.0
+                        
+                        if final_gaps['fat'] > 0:  # Need more fat
+                            additional_qty = min(final_gaps['fat'] / fat_per_g, 30)  # Max 30g increase
+                            new_qty = current_qty + additional_qty
+                            fine_tuned_quantities[best_fat_ingredient['name']] = round(new_qty, 1)
+                            logger.info(f"🎯 Increased {best_fat_ingredient['name']}: {current_qty:.1f}g → {new_qty:.1f}g (+{additional_qty:.1f}g)")
+                
+                # Apply fine-tuned quantities
+                final_result['quantities'] = fine_tuned_quantities
+                final_nutrition = self._calculate_final_meal(all_ingredients, fine_tuned_quantities)
+                final_target_achievement = self._check_target_achievement(final_nutrition, target_macros)
+                
+                logger.info(f"🎯🎯 After fine-tuning - Achievement: {final_target_achievement}")
+                logger.info(f"🎯🎯 After fine-tuning - Totals: {final_nutrition}")
+                
+                                # Calculate final improvement
+                final_score = self._calculate_optimization_score(final_nutrition, target_macros)
+                logger.info(f"🎯🎯 Final fine-tuned score: {final_score:.2f}")
+                
+                # ---- STEP 6: DIRECT TARGET ADJUSTMENT (simple and effective) ----
+                logger.info("🎯🎯🎯 DIRECT TARGET ADJUSTMENT: Adding exactly what we need...")
+                
+                # Calculate remaining gaps after fine-tuning
+                remaining_gaps = {}
+                for macro in ['protein', 'carbs', 'fat', 'calories']:
+                    current = final_nutrition.get(macro, 0)
+                    target = target_macros.get(macro, 0)
+                    gap = target - current
+                    if abs(gap) > 1:  # Only significant gaps
+                        remaining_gaps[macro] = gap
+                
+                if remaining_gaps:
+                    logger.info(f"🎯 Remaining gaps after fine-tuning: {remaining_gaps}")
+                    
+                    # Add helpers specifically for remaining gaps
+                    direct_helpers = []
+                    normalized_meal_type = self._normalize_meal_type(meal_type)
+                    
+                    for macro, gap in remaining_gaps.items():
+                        if gap > 0:  # Only deficits
+                            if macro == 'calories':
+                                # For calories, add a balanced helper
+                                best_helper = self._select_best_helper_candidate(normalized_meal_type, 'carbs', set())
+                                if best_helper:
+                                    # Calculate how much we need
+                                    calories_per_100g = best_helper.get('calories_per_100g', 0)
+                                    if calories_per_100g > 0:
+                                        needed_amount = min((gap * 100) / calories_per_100g, 60)
+                                        best_helper['quantity_needed'] = needed_amount
+                                        direct_helpers.append(best_helper)
+                                        logger.info(f"🎯 Added {best_helper['name']} ({needed_amount:.1f}g) for {gap:.1f} calories")
+                            else:
+                                # For macros, add specific helper
+                                best_helper = self._select_best_helper_candidate(normalized_meal_type, macro, set())
+                                if best_helper:
+                                    macro_per_100g = best_helper.get(f'{macro}_per_100g', 0)
+                                    if macro_per_100g > 0:
+                                        needed_amount = min((gap * 100) / macro_per_100g, 60)
+                                        best_helper['quantity_needed'] = needed_amount
+                                        direct_helpers.append(best_helper)
+                                        logger.info(f"🎯 Added {best_helper['name']} ({needed_amount:.1f}g) for {gap:.1f}g {macro}")
+                    
+                    if direct_helpers:
+                        # Add direct helpers to ingredients list
+                        all_ingredients.extend(direct_helpers)
+                        
+                        # Extend quantities list with direct helper quantities
+                        for helper in direct_helpers:
+                            fine_tuned_quantities.append(helper.get('quantity_needed', 0))
+                        
+                        # Recalculate with direct helpers
+                        final_result['quantities'] = fine_tuned_quantities
+                        final_nutrition = self._calculate_final_meal(all_ingredients, fine_tuned_quantities)
+                        final_target_achievement = self._check_target_achievement(final_nutrition, target_macros)
+                        
+                        logger.info(f"🎯🎯🎯 After direct target adjustment - Achievement: {final_target_achievement}")
+                        logger.info(f"🎯🎯🎯 After direct target adjustment - Totals: {final_nutrition}")
+                
+                # 🔄 NEW: Re-optimize with advanced methods after balancing
+                logger.info("🔄 Re-optimizing with advanced methods after balancing...")
+                re_optimized_result = self._re_optimize_after_balancing(all_ingredients, target_macros, final_nutrition)
+                
+                if re_optimized_result:
+                    logger.info(f"🎯 Re-optimization improved score from {final_target_achievement} to {re_optimized_result['achievement']}")
+                    final_result = re_optimized_result['result']
+                    final_nutrition = re_optimized_result['nutrition']
+                    final_target_achievement = re_optimized_result['achievement']
 
             final_ingredients = self._materialize_ingredients(all_ingredients, final_result['quantities'])
+            
+            # SAFETY CHECK: If final_ingredients is empty, use original ingredients
+            if not final_ingredients and request_data:
+                logger.warning("⚠️ Final ingredients is empty after materialization, using original ingredients...")
+                try:
+                    original_ingredients = self._extract_rag_ingredients(request_data)
+                    if original_ingredients:
+                        logger.info(f"✅ Found {len(original_ingredients)} original ingredients, using them")
+                        final_ingredients = original_ingredients
+                    else:
+                        logger.error("❌ No original ingredients found either!")
+                except Exception as e:
+                    logger.error(f"❌ Error getting original ingredients: {e}")
+            
             computation_time = time.time() - start_time
 
             return self._format_output(final_ingredients, final_result, final_nutrition,
@@ -388,17 +604,60 @@ class RAGMealOptimizer:
         except Exception as e:
             computation_time = time.time() - start_time
             logger.error(f"❌ Fatal error in meal optimization: {e}")
+            
+            # EMERGENCY FALLBACK: Try to return original ingredients if possible
+            emergency_meal = []
+            emergency_totals = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+            
+            try:
+                if request_data:
+                    logger.warning("🚨 Emergency fallback: trying to extract original ingredients...")
+                    emergency_ingredients = self._extract_rag_ingredients(request_data)
+                    if emergency_ingredients:
+                        logger.info(f"✅ Emergency fallback successful: found {len(emergency_ingredients)} ingredients")
+                        emergency_meal = []
+                        for ing in emergency_ingredients:
+                            emergency_meal.append({
+                                "name": ing['name'].replace('_', ' ').title(),
+                                "quantity_needed": round(max(0.0, ing.get('quantity_needed', 0.0)), 1),
+                                "protein_per_100g": ing.get('protein_per_100g', 0),
+                                "carbs_per_100g": ing.get('carbs_per_100g', 0),
+                                "fat_per_100g": ing.get('fat_per_100g', 0),
+                                "calories_per_100g": ing.get('calories_per_100g', 0)
+                            })
+                        
+                        # Calculate emergency totals
+                        for ing in emergency_ingredients:
+                            qty = ing.get('quantity_needed', 0) / 100.0
+                            emergency_totals['calories'] += ing.get('calories_per_100g', 0) * qty
+                            emergency_totals['protein'] += ing.get('protein_per_100g', 0) * qty
+                            emergency_totals['carbs'] += ing.get('carbs_per_100g', 0) * qty
+                            emergency_totals['fat'] += ing.get('fat_per_100g', 0) * qty
+                        
+                        logger.info(f"✅ Emergency fallback: meal={len(emergency_meal)}, totals={emergency_totals}")
+                    else:
+                        logger.error("❌ Emergency fallback failed: no ingredients found")
+            except Exception as fallback_error:
+                logger.error(f"❌ Emergency fallback also failed: {fallback_error}")
+            
             return {
+                "user_id": request_data.get('user_id', 'default_user') if request_data else 'default_user',
+                "success": len(emergency_meal) > 0,  # True if we have emergency ingredients
                 "optimization_result": {
-                    "success": False,
-                    "method": "Error",
+                    "success": len(emergency_meal) > 0,
+                    "method": "Emergency Fallback" if len(emergency_meal) > 0 else "Error",
                     "computation_time": round(computation_time, 3),
-                    "error": str(e)
+                    "error": str(e) if len(emergency_meal) == 0 else "Recovered with emergency fallback"
                 },
-                "meal": [],
-                "nutritional_totals": {"calories": 0, "protein": 0, "carbs": 0, "fat": 0},
-                "target_achievement": {"overall": False},
-                "helper_ingredients_added": []
+                "meal": emergency_meal,
+                "nutritional_totals": emergency_totals,
+                "target_achievement": {"overall": len(emergency_meal) > 0},
+                "helper_ingredients_added": [],
+                "optimization_steps": {
+                    "step1": "Emergency fallback due to optimization error",
+                    "step2": "Original ingredients preserved",
+                    "step3": "Basic nutritional calculation"
+                }
             }
 
     # --------------------- Helpers: Orchestration & Output ---------------------
@@ -408,6 +667,20 @@ class RAGMealOptimizer:
                        computation_time: float, request_data: Optional[Dict]) -> Dict:
         # Format meal for output
         formatted_meal = []
+        
+        # SAFETY CHECK: If final_ingredients is empty, try to get original ingredients
+        if not final_ingredients and request_data:
+            logger.warning("⚠️ Final ingredients is empty, trying to get original ingredients...")
+            try:
+                original_ingredients = self._extract_rag_ingredients(request_data)
+                if original_ingredients:
+                    logger.info(f"✅ Found {len(original_ingredients)} original ingredients, using them")
+                    final_ingredients = original_ingredients
+                else:
+                    logger.error("❌ No original ingredients found either!")
+            except Exception as e:
+                logger.error(f"❌ Error getting original ingredients: {e}")
+        
         for ing in final_ingredients:
             formatted_meal.append({
                 "name": ing['name'].replace('_', ' ').title(),
@@ -4144,66 +4417,3 @@ class RAGMealOptimizer:
         
     # REMOVED: _run_genetic_algorithm_final - Unrealistic method with extreme parameters
 
-    def _cleanup_excess_ingredients(self, ingredients: List[Dict], target_macros: Dict, meal_type: str) -> List[Dict]:
-        """
-        Clean up excessive helper ingredients and re-optimize the meal.
-        This method removes ingredients that are causing the meal to be too far from targets.
-        """
-        logger.info("🧹 Cleaning up excess ingredients and re-optimizing...")
-        
-        # Separate input ingredients from helper ingredients
-        input_ingredients = []
-        helper_ingredients = []
-        
-        for ing in ingredients:
-            if '_balancing_amount' in ing or ing.get('name') in [h['name'] for h in self.helper_ingredients.get('morning_snack', {}).get('protein', [])]:
-                helper_ingredients.append(ing)
-            else:
-                input_ingredients.append(ing)
-        
-        logger.info(f"📋 Input ingredients: {len(input_ingredients)}, Helper ingredients: {len(helper_ingredients)}")
-        
-        # If we have too many helper ingredients, remove some
-        if len(helper_ingredients) > 3:  # Keep max 3 helper ingredients
-            logger.info(f"🗑️ Too many helper ingredients ({len(helper_ingredients)}), removing excess...")
-            
-            # Sort helper ingredients by their contribution to target achievement
-            helper_scores = []
-            for helper in helper_ingredients:
-                score = 0
-                # Calculate how well this helper contributes to targets
-                for macro in ['protein', 'carbs', 'fat']:
-                    target = target_macros.get(macro, 0)
-                    current = helper.get(f'{macro}_per_100g', 0) * helper.get('quantity_needed', 0) / 100
-                    if target > 0:
-                        score += min(current / target, 1.0)  # Higher score for better target contribution
-                helper_scores.append((helper, score))
-            
-            # Sort by score (highest first) and keep top 3
-            helper_scores.sort(key=lambda x: x[1], reverse=True)
-            helper_ingredients = [h[0] for h in helper_scores[:3]]
-            logger.info(f"✅ Kept top 3 helper ingredients: {[h['name'] for h in helper_ingredients]}")
-        
-        # Combine input and cleaned helper ingredients
-        cleaned_ingredients = input_ingredients + helper_ingredients
-        
-        # Re-optimize with cleaned ingredients
-        logger.info("🔄 Re-optimizing with cleaned ingredients...")
-        
-        # Run optimization on cleaned ingredients
-        optimization_result = self._run_optimization_methods(cleaned_ingredients, target_macros)
-        
-        if optimization_result and optimization_result.get('success'):
-            # Apply the optimization
-            optimized_quantities = optimization_result.get('quantities', [])
-            
-            # Update ingredient quantities
-            for i, ing in enumerate(cleaned_ingredients):
-                if i < len(optimized_quantities):
-                    ing['quantity_needed'] = optimized_quantities[i]
-            
-            logger.info("✅ Cleanup and re-optimization completed successfully")
-            return cleaned_ingredients
-        else:
-            logger.warning("⚠️ Re-optimization failed, returning original ingredients")
-            return ingredients

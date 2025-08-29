@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script to debug _extract_rag_ingredients method
+Test _extract_rag_ingredients method
 """
 
 import sys
@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from rag_optimization_engine import RAGMealOptimizer
 
 def test_extract_ingredients():
-    """Test _extract_rag_ingredients method directly"""
+    """Test _extract_rag_ingredients method"""
     
     optimizer = RAGMealOptimizer()
     
@@ -55,29 +55,28 @@ def test_extract_ingredients():
         "meal_type": "Morning Snack"
     }
     
-    print("📥 Test data structure:")
-    print(f"   - Top level keys: {list(test_data.keys())}")
-    print(f"   - rag_response keys: {list(test_data['rag_response'].keys())}")
-    print(f"   - ingredients count: {len(test_data['rag_response']['ingredients'])}")
-    
-    print("\n🔧 Testing _extract_rag_ingredients...")
+    print("📥 Test data:")
+    print(f"   - Meal type: {test_data['meal_type']}")
+    print(f"   - Target macros: {test_data['target_macros']}")
     
     try:
-        # Test with full request_data
-        extracted = optimizer._extract_rag_ingredients(test_data)
-        print(f"✅ Extracted {len(extracted)} ingredients")
+        # Test _extract_rag_ingredients directly
+        ingredients = optimizer._extract_rag_ingredients(test_data)
         
-        for i, ing in enumerate(extracted):
-            print(f"   {i+1}. {ing['name']}: P={ing.get('protein_per_100g', 0)}, C={ing.get('carbs_per_100g', 0)}, F={ing.get('fat_per_100g', 0)}, Cal={ing.get('calories_per_100g', 0)}")
+        print(f"\n✅ _extract_rag_ingredients completed!")
+        print(f"   - Extracted ingredients: {len(ingredients)}")
         
-        # Test with just rag_response
-        print(f"\n🔧 Testing with just rag_response...")
-        extracted2 = optimizer._extract_rag_ingredients(test_data['rag_response'])
-        print(f"✅ Extracted {len(extracted2)} ingredients from rag_response")
-        
-        for i, ing in enumerate(extracted2):
-            print(f"   {i+1}. {ing['name']}: P={ing.get('protein_per_100g', 0)}, C={ing.get('carbs_per_100g', 0)}, F={ing.get('fat_per_100g', 0)}, Cal={ing.get('calories_per_100g', 0)}")
-        
+        if ingredients:
+            print(f"\n🍽️ Extracted ingredients:")
+            for ing in ingredients:
+                print(f"   - {ing['name']}: {ing.get('quantity_needed', 0)}g")
+                print(f"     Protein: {ing.get('protein_per_100g', 0)}g")
+                print(f"     Carbs: {ing.get('carbs_per_100g', 0)}g")
+                print(f"     Fat: {ing.get('fat_per_100g', 0)}g")
+                print(f"     Calories: {ing.get('calories_per_100g', 0)}")
+        else:
+            print("   ❌ No ingredients extracted!")
+            
     except Exception as e:
         print(f"❌ Error: {e}")
         import traceback

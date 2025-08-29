@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Test API response to check if data is returned correctly
+Test Morning Snack with simple data
 """
 
 import requests
 import json
 
-def test_api_response():
-    """Test the API endpoint directly"""
+def test_morning_snack_simple():
+    """Test Morning Snack with simple data"""
     
-    print("🧪 Testing API Response")
-    print("=" * 50)
+    print("🧪 Testing Morning Snack with Simple Data")
+    print("=" * 60)
     
-    # Test data for Morning Snack
+    # Test data for Morning Snack with simple ingredients
     test_data = {
         "rag_response": {
             "ingredients": [
@@ -22,25 +22,15 @@ def test_api_response():
                     "carbs_per_100g": 8,
                     "fat_per_100g": 2,
                     "calories_per_100g": 60,
-                    "quantity_needed": 100,
-                    "max_quantity": 500
-                },
-                {
-                    "name": "Almonds",
-                    "protein_per_100g": 20,
-                    "carbs_per_100g": 20,
-                    "fat_per_100g": 46.67,
-                    "calories_per_100g": 533.33,
-                    "quantity_needed": 100,
-                    "max_quantity": 500
+                    "quantity_needed": 100
                 }
             ]
         },
         "target_macros": {
-            "calories": 283.2,
-            "protein": 22.7,
-            "carbs": 35.4,
-            "fat": 6.7
+            "calories": 60,
+            "protein": 6,
+            "carbs": 8,
+            "fat": 2
         },
         "user_preferences": {
             "diet_type": "balanced",
@@ -64,7 +54,6 @@ def test_api_response():
         
         print(f"\n📡 API Response:")
         print(f"   - Status Code: {response.status_code}")
-        print(f"   - Response Headers: {dict(response.headers)}")
         
         if response.status_code == 200:
             result = response.json()
@@ -97,4 +86,4 @@ def test_api_response():
     print("\n✅ Test completed!")
 
 if __name__ == "__main__":
-    test_api_response()
+    test_morning_snack_simple()

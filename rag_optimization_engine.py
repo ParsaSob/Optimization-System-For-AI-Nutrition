@@ -258,12 +258,12 @@ class RAGMealOptimizer:
             target_achievement = self._check_target_achievement(initial_nutrition, target_macros)
             logger.info(f"📈 Initial target achievement: {target_achievement}")
 
+            # 🎯 ALWAYS CONTINUE: Even if overall is True, still add helpers for individual macro issues
+            logger.info(f"🎯 Target achievement: {target_achievement}")
             if target_achievement['overall']:
-                # Done
-                final_ingredients = self._materialize_ingredients(rag_ingredients, initial_result['quantities'])
-                computation_time = time.time() - start_time
-                return self._format_output(final_ingredients, initial_result, initial_nutrition,
-                                           target_achievement, [], computation_time, request_data)
+                logger.info("🎯 Overall targets achieved, but checking individual macros for improvement...")
+            else:
+                logger.info("🎯 Overall targets not achieved, adding helpers for balance...")
 
             # ---- STEP 2: Add smart helper ingredients for both deficits and excesses ----
             logger.info("🔧 Step 2: Targets not fully achieved. Adding helper ingredients for balance...")
@@ -276,10 +276,13 @@ class RAGMealOptimizer:
             # Calculate deficits and excesses
             deficits = {}
             excesses = {}
+            logger.info(f"🔍 DEBUG: Calculating deficits and excesses...")
             for macro in ['protein', 'carbs', 'fat', 'calories']:
                 current = current_nutrition.get(macro, 0)
                 target = target_macros.get(macro, 0)
                 diff = target - current
+                
+                logger.info(f"🔍 DEBUG: {macro} - current: {current:.1f}, target: {target:.1f}, diff: {diff:.1f}")
                 
                 if diff > 0:
                     deficits[macro] = diff
@@ -287,8 +290,13 @@ class RAGMealOptimizer:
                 elif diff < 0:
                     excesses[macro] = abs(diff)
                     logger.info(f"📈 {macro.capitalize()} excess: {abs(diff):.1f}g")
+                else:
+                    logger.info(f"✅ {macro.capitalize()} - target met exactly")
             
-            # TARGET-AWARE HELPER ADDITION: Only add helpers if we're significantly under targets
+            logger.info(f"🔍 DEBUG: Final deficits: {deficits}")
+            logger.info(f"🔍 DEBUG: Final excesses: {excesses}")
+            
+            # 🎯 ALWAYS ADD HELPERS: Add helpers for ANY macro that doesn't reach target, regardless of overall achievement
             significant_deficits = {k: v for k, v in deficits.items() if v > 0.5}  # Ultra-sensitive threshold to 0.5g
             
             # Add helper ingredients for deficits (with quantity limits)
@@ -313,10 +321,10 @@ class RAGMealOptimizer:
             else:
                 logger.info("🎯 No significant deficits - skipping deficit helpers")
             
-            # Add balancing ingredients for excesses (with strict limits)
+            # 🎯 ALWAYS ADD BALANCING: Add balancing ingredients for ANY excess, regardless of overall achievement
             balancing_helpers = []
             if excesses and any(v > 1 for v in excesses.values()):  # Only if excess > 1g
-                logger.info(f"⚖️ Adding balancing ingredients for excesses: {excesses}")
+                logger.info(f"🎯 ALWAYS: Adding balancing ingredients for any excess, regardless of overall achievement!")
                 logger.info(f"🔍 Excess details: {excesses}")
                 
                 # Debug: Check if we have excess macros
@@ -343,9 +351,9 @@ class RAGMealOptimizer:
                         balancer['quantity_needed'] = max_balancing_quantity
                         logger.info(f"🔒 Limited {balancer['name']} to {max_balancing_quantity}g")
                 
-                logger.info(f"⚖️ Added {len(balancing_helpers)} limited balancing helper ingredients")
+                logger.info(f"🎯 ALWAYS: Added {len(balancing_helpers)} balancing ingredients for excesses")
             else:
-                logger.info("⚖️ No excesses - skipping balancing helpers")
+                logger.info("🎯 ALWAYS: No excesses - skipping balancing helpers")
             
             # ALWAYS add balancing ingredients if there are excesses, regardless of overall achievement
             if excesses and any(v > 1 for v in excesses.values()) and not balancing_helpers:
@@ -376,6 +384,20 @@ class RAGMealOptimizer:
                         forced_balancer['_forced_balancing'] = True
                         balancing_helpers.append(forced_balancer)
                         logger.info(f"🚨 FORCED balancer: {forced_balancer['name']} ({forced_balancer['quantity_needed']}g)")
+            
+            # 🎯 ALWAYS ADD HELPERS: Add helpers for ANY macro that doesn't reach target, regardless of overall achievement
+            if significant_deficits and not deficit_helpers:
+                logger.info(f"🎯 ALWAYS: Adding helpers for any macro deficits, regardless of overall achievement!")
+                # Add helpers for each macro deficit
+                for macro, deficit in significant_deficits.items():
+                    logger.info(f"🎯 ALWAYS: Adding helper for {macro} deficit: {deficit:.1f}g")
+                    always_helper = self._select_best_helper_candidate(meal_type, macro, set())
+                    if always_helper:
+                        # Calculate quantity to fill deficit
+                        always_helper['quantity_needed'] = min(80, deficit * 15)  # Reasonable quantities
+                        always_helper['_always_addition'] = True
+                        deficit_helpers.append(always_helper)
+                        logger.info(f"🎯 ALWAYS helper: {always_helper['name']} ({always_helper['quantity_needed']}g)")
             
             # 🚨 AGGRESSIVE HELPER ADDITION: Force add helpers if targets are not achieved
             if not any(target_achievement.values()) and not deficit_helpers:

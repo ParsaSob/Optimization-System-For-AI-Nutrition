@@ -523,6 +523,17 @@ class RAGMealOptimizer:
                     if abs(gap) > 1:  # Only significant gaps
                         remaining_gaps[macro] = gap
                 
+                # 🔧 GAP VALIDATION: Check if gaps are reasonable
+                if remaining_gaps:
+                    logger.info(f"🎯 Remaining gaps after fine-tuning: {remaining_gaps}")
+                    
+                    # Check if any gaps are unreasonably large (indicates fine-tuning failure)
+                    large_gaps = {k: v for k, v in remaining_gaps.items() if abs(v) > 20}
+                    if large_gaps:
+                        logger.warning(f"⚠️ Large gaps detected: {large_gaps} - Fine-tuning may have failed")
+                        logger.warning("⚠️ Skipping direct target adjustment due to large gaps")
+                        remaining_gaps = {}  # Skip direct adjustment
+                
                 if remaining_gaps:
                     logger.info(f"🎯 Remaining gaps after fine-tuning: {remaining_gaps}")
                     
@@ -569,6 +580,9 @@ class RAGMealOptimizer:
                         
                         logger.info(f"🎯🎯🎯 After direct target adjustment - Achievement: {final_target_achievement}")
                         logger.info(f"🎯🎯🎯 After direct target adjustment - Totals: {final_nutrition}")
+                        
+                        # 🔧 CRITICAL FIX: Update final_result quantities to match final_ingredients
+                        final_ingredients = self._materialize_ingredients(all_ingredients, fine_tuned_quantities)
                 
                 # 🔄 NEW: Re-optimize with advanced methods after balancing
                 logger.info("🔄 Re-optimizing with advanced methods after balancing...")

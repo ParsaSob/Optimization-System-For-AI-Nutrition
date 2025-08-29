@@ -1454,7 +1454,7 @@ class RAGMealOptimizer:
         target_macros_list = focus_macros if focus_macros else ['protein', 'carbs', 'fat']
         
         for macro in target_macros_list:
-            if macro not in deficits or deficits[macro] <= 1.0:  # Increased threshold to be more aggressive
+            if macro not in deficits or deficits[macro] <= 0.5:  # Reduced threshold to be more sensitive
                 continue
             
             logger.info(f"🔧 Adding helpers for {macro} deficit: {deficits[macro]:.1f}g")
@@ -1463,7 +1463,7 @@ class RAGMealOptimizer:
             count = 0
             max_helpers = 3  # Increased max helpers
             
-            while deficits[macro] > 1.0 and count < max_helpers:
+            while deficits[macro] > 0.5 and count < max_helpers:
                 h = self._select_best_helper_candidate(normalized_meal_type, macro, existing)
                 if not h:
                     logger.warning(f"⚠️ No helper candidate found for {macro}")

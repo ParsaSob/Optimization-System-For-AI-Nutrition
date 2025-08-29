@@ -1578,9 +1578,9 @@ class RAGMealOptimizer:
                 
                 # Check calorie impact - be very lenient
                 additional_calories = h['calories_per_100g'] * amount / 100
-                if totals['calories'] + additional_calories > target_macros['calories'] * 1.5:  # Very lenient
-                    logger.info(f"⚠️ Helper {h['name']} would add {additional_calories:.1f} calories, skipping")
-                    continue
+                if totals['calories'] + additional_calories > target_macros['calories'] * 2.0:  # Extremely lenient
+                    logger.info(f"⚠️ Helper {h['name']} would add {additional_calories:.1f} calories, but adding anyway for balance")
+                    # Don't skip - add the helper for better macro balance
                 
                 # Add quantity_needed to helper ingredient
                 h_with_quantity = dict(h)

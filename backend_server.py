@@ -83,4 +83,4 @@ if __name__ == '__main__':
         app.run(host='0.0.0.0', port=port, debug=debug_mode)
     except Exception as e:
         print(f"❌ Error starting server: {e}")
-            exit(1)
+        exit(1)

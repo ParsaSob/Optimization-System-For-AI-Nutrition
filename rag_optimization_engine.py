@@ -289,7 +289,7 @@ class RAGMealOptimizer:
                     logger.info(f"📈 {macro.capitalize()} excess: {abs(diff):.1f}g")
             
             # TARGET-AWARE HELPER ADDITION: Only add helpers if we're significantly under targets
-            significant_deficits = {k: v for k, v in deficits.items() if v > 1}  # Reduced threshold to 1g (more sensitive)
+            significant_deficits = {k: v for k, v in deficits.items() if v > 0.5}  # Ultra-sensitive threshold to 0.5g
             
             # Add helper ingredients for deficits (with quantity limits)
             deficit_helpers = []
@@ -360,6 +360,52 @@ class RAGMealOptimizer:
                             minimal_balancer['quantity_needed'] = min(20, excess_amount * 2)  # Small amount
                             balancing_helpers.append(minimal_balancer)
                             logger.info(f"✅ Added minimal balancer: {minimal_balancer['name']} ({minimal_balancer['quantity_needed']}g)")
+            
+            # FORCE BALANCING: Always add balancing ingredients for significant excesses (>5g)
+            significant_excesses = {k: v for k, v in excesses.items() if v > 5}
+            if significant_excesses and not balancing_helpers:
+                logger.info(f"🚨 FORCING balancing for significant excesses: {significant_excesses}")
+                for excess_macro, excess_amount in significant_excesses.items():
+                    logger.info(f"🚨 FORCING balancing for {excess_macro} excess: {excess_amount:.1f}g")
+                    # Force add balancing ingredients
+                    forced_balancer = self._select_best_helper_candidate(meal_type, excess_macro, set())
+                    if forced_balancer:
+                        # Calculate amount to reduce excess by 50%
+                        reduction_amount = excess_amount * 0.5
+                        forced_balancer['quantity_needed'] = min(50, reduction_amount * 10)  # More aggressive
+                        forced_balancer['_forced_balancing'] = True
+                        balancing_helpers.append(forced_balancer)
+                        logger.info(f"🚨 FORCED balancer: {forced_balancer['name']} ({forced_balancer['quantity_needed']}g)")
+            
+            # 🚨 AGGRESSIVE HELPER ADDITION: Force add helpers if targets are not achieved
+            if not any(target_achievement.values()) and not deficit_helpers:
+                logger.info(f"🚨 AGGRESSIVE: No targets achieved, forcing helper addition!")
+                # Force add helpers for each macro deficit
+                for macro, deficit in deficits.items():
+                    if deficit > 0.1:  # Even tiny deficits
+                        logger.info(f"🚨 AGGRESSIVE: Adding helper for {macro} deficit: {deficit:.1f}g")
+                        aggressive_helper = self._select_best_helper_candidate(meal_type, macro, set())
+                        if aggressive_helper:
+                            # Calculate aggressive quantity to fill deficit
+                            aggressive_helper['quantity_needed'] = min(100, deficit * 20)  # Very aggressive
+                            aggressive_helper['_aggressive_addition'] = True
+                            deficit_helpers.append(aggressive_helper)
+                            logger.info(f"🚨 AGGRESSIVE helper: {aggressive_helper['name']} ({aggressive_helper['quantity_needed']}g)")
+            
+            # 🚨 FORCE TARGET ACHIEVEMENT: If still no targets achieved, use extreme methods
+            if not any(target_achievement.values()) and len(deficit_helpers) < 2:
+                logger.info(f"🚨 EXTREME: Still no targets achieved, using extreme helper addition!")
+                # Add multiple helpers for each macro
+                for macro in ['protein', 'carbs', 'fat', 'calories']:
+                    if macro in deficits and deficits[macro] > 0.1:
+                        logger.info(f"🚨 EXTREME: Adding multiple helpers for {macro}")
+                        for i in range(2):  # Add 2 helpers per macro
+                            extreme_helper = self._select_best_helper_candidate(meal_type, macro, set())
+                            if extreme_helper:
+                                extreme_helper['quantity_needed'] = min(150, deficits[macro] * 30)  # Extreme quantities
+                                extreme_helper['_extreme_addition'] = True
+                                deficit_helpers.append(extreme_helper)
+                                logger.info(f"🚨 EXTREME helper {i+1}: {extreme_helper['name']} ({extreme_helper['quantity_needed']}g)")
             
             # Combine all helpers
             helper_ingredients = deficit_helpers + balancing_helpers
